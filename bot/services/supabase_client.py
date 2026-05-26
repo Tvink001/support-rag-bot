@@ -16,7 +16,7 @@ from uuid import UUID
 
 import asyncpg
 
-from bot.models import Chunk, RetrievedChunk, Source
+from bot.models import Chunk, ConversationTurn, FeedbackContext, RetrievedChunk, Source
 
 logger = logging.getLogger(__name__)
 
@@ -169,3 +169,92 @@ class Database:
                 )
             )
         return chunks
+
+    # --- conversation memory (§13) -------------------------------------------
+    async def append_message(self, user_id: int, role: str, content: str) -> int:
+        """Persist one conversation turn; return its ``messages.id``."""
+        message_id: int = await self.pool.fetchval(
+            "insert into public.messages (user_id, role, content) values ($1, $2, $3) returning id",
+            user_id,
+            role,
+            content,
+        )
+        return message_id
+
+    async def load_recent_messages(self, user_id: int, limit: int) -> list[ConversationTurn]:
+        """Return the last ``limit`` turns for ``user_id`` in chronological order."""
+        rows = await self.pool.fetch(
+            "select role, content from public.messages "
+            "where user_id = $1 order by id desc limit $2",
+            user_id,
+            limit,
+        )
+        # fetched newest-first for the LIMIT; reverse to chronological for the prompt.
+        return [ConversationTurn(role=r["role"], content=r["content"]) for r in reversed(rows)]
+
+    # --- feedback (§16) -------------------------------------------------------
+    async def get_feedback_context(self, assistant_msg_id: int) -> FeedbackContext | None:
+        """Recover the (user, question, answer) a 👍/👎 tap refers to.
+
+        ``assistant_msg_id`` is the ``messages.id`` of the answer the buttons hang
+        under; the question is the user's most recent turn before it.
+        """
+        answer_row = await self.pool.fetchrow(
+            "select user_id, content from public.messages where id = $1 and role = 'assistant'",
+            assistant_msg_id,
+        )
+        if answer_row is None:
+            return None
+        question_row = await self.pool.fetchrow(
+            "select content from public.messages "
+            "where user_id = $1 and role = 'user' and id < $2 order by id desc limit 1",
+            answer_row["user_id"],
+            assistant_msg_id,
+        )
+        return FeedbackContext(
+            user_id=answer_row["user_id"],
+            question=question_row["content"] if question_row is not None else "",
+            answer=answer_row["content"],
+        )
+
+    async def record_feedback(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        answer: str,
+        rating: int,
+        cited_source_ids: list[str],
+    ) -> bool:
+        """Upsert a feedback row keyed by (user, question, answer); idempotent.
+
+        A second tap on the same answer updates the rating in place rather than
+        adding a row, so a double-tap never duplicates. Returns True if a new row
+        was inserted, False if an existing one was updated.
+        """
+        payload = json.dumps(cited_source_ids)
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                updated = await conn.fetchval(
+                    "update public.feedback "
+                    "set rating = $4, cited_source_ids = $5::jsonb, created_at = now() "
+                    "where user_id = $1 and question = $2 and answer = $3 returning id",
+                    user_id,
+                    question,
+                    answer,
+                    rating,
+                    payload,
+                )
+                if updated is not None:
+                    return False
+                await conn.execute(
+                    "insert into public.feedback "
+                    "(user_id, question, answer, rating, cited_source_ids) "
+                    "values ($1, $2, $3, $4, $5::jsonb)",
+                    user_id,
+                    question,
+                    answer,
+                    rating,
+                    payload,
+                )
+        return True

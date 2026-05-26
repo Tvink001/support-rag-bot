@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -45,3 +45,18 @@ class RetrievedChunk(BaseModel):
     similarity: float
     filename: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConversationTurn(BaseModel):
+    """One stored message in a user's conversation memory (``messages`` table, §13)."""
+
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class FeedbackContext(BaseModel):
+    """The question/answer pair a 👍/👎 tap refers to, recovered from ``messages`` (§16)."""
+
+    user_id: int
+    question: str
+    answer: str

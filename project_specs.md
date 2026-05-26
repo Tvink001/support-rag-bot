@@ -631,13 +631,24 @@ threshold) → motivates WOW 1 hybrid search (§17).
 
 ---
 
-## 13. Conversation Memory `[filled]`
+## 13. Conversation Memory `[filled — code in Prompt 5]`
 
 `bot/memory/conversation.py`: on each turn, read the last
 `CONVERSATION_MEMORY_TURNS` rows for `user_id` from `messages` (ordered), pass to
 Claude as prior turns, then append the new user+assistant pair. Trimming is a
 read-window, not a delete (full history retained for analytics; or prune on a
 schedule `[TBD]`). All access async.
+
+**Built (Prompt 5):** `ConversationMemory(db)` wraps the `Database` queries
+`load_recent_messages(user_id, limit)` (newest-first `LIMIT`, reversed to
+chronological) and `append_message(user_id, role, content) → messages.id`.
+`CONVERSATION_MEMORY_TURNS` (default 20) counts message **rows**, not exchanges.
+Wiring (Context7-verified 2026-05-27, `/websites/platform_claude_en`): prior
+turns go into the Messages array as **plain-text** `{"role", "content"}` entries;
+the retrieved `document` blocks (+ citations) live **only in the current question
+turn**; the system prompt stays the top-level cached `system` param. v1 persists
+memory on the **answered path only** (below-threshold refusals are not stored —
+revisited with escalation in Prompt 6).
 
 ---
 
@@ -682,6 +693,18 @@ confirm count removed). **Feedback:** every answer ships `FeedbackCB(+1|-1)`
 inline buttons → insert into `feedback` with the question, answer, and cited
 source ids → toast "спасибо". Feedback powers the eval loop (top 👎 questions =
 what to add to the KB).
+
+**Built (Prompt 5) — feedback half:** `FeedbackCB(rating: int, msg_ref: str)`
+(prefix `fb`); `msg_ref` = the assistant `messages.id` the buttons hang under, so
+the question/answer are recovered server-side (`get_feedback_context`) and survive
+a restart — no Q/A is stuffed into the 64-byte callback budget. `record_feedback`
+is an **idempotent upsert keyed by (user_id, question, answer)**: a second tap
+updates the rating in place (never a duplicate row) and the keyboard is removed
+after the first tap ("message is not modified" swallowed). `cited_source_ids`
+stores the cited source **filenames** (parsed from the answer's "Источник: …"
+footer), chosen over UUIDs because the callback budget can't carry them and there
+is no pending-answer store — filenames are also the human-useful key for the
+analytics loop. `/delete <id>` + the rest of admin polish remains **Prompt 8**.
 
 ---
 

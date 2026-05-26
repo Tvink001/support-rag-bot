@@ -87,3 +87,34 @@ async def test_below_threshold_returns_honest_without_calling_claude() -> None:
     message.answer.assert_awaited_once()
     assert "менеджеру" in message.answer.await_args.args[0]
     claude.answer.assert_not_awaited()  # no LLM call below the similarity threshold
+
+
+async def test_answer_path_loads_memory_persists_and_attaches_feedback() -> None:
+    db = AsyncMock()
+    db.match_chunks.return_value = [_chunk("Доставка курьером в день заказа.", 0.81, "faq.docx")]
+    db.load_recent_messages.return_value = []  # no prior turns
+    db.append_message.return_value = 77  # stand-in assistant messages.id
+
+    claude = AsyncMock()
+    claude.answer.return_value = SimpleNamespace(
+        text="Доставка в день заказа.",
+        sources=["faq.docx"],
+        input_tokens=1000,
+        output_tokens=20,
+        cache_read_tokens=0,
+        cache_creation_tokens=0,
+    )
+
+    message = AsyncMock()
+    message.text = "Сколько идёт доставка?"
+    message.from_user = SimpleNamespace(id=555)
+
+    await handle_question(message, db=db, embeddings=_FakeEmbeddings(), claude=claude)
+
+    claude.answer.assert_awaited_once()
+    assert claude.answer.await_args.kwargs["history"] == []  # memory loaded + passed
+    assert db.append_message.await_count == 2  # user + assistant turns persisted
+    message.answer.assert_awaited_once()
+    sent_text = message.answer.await_args.args[0]
+    assert "Источник: faq.docx" in sent_text
+    assert message.answer.await_args.kwargs["reply_markup"] is not None  # feedback buttons

@@ -275,3 +275,23 @@ on 429/529 — no tenacity needed. (3) Vector-only retrieval misses SKUs/article
 did NOT engage (`cache_creation_input_tokens=0` → the ~400-token prompt is below Haiku
 4.5's min cacheable length — confirms the §9.2 gap). (5) Voyage free tier = **3 RPM**
 without a payment method.
+
+### 2026-05-27 — Prompt 5: memory turns are plain text; document blocks only in the current turn — #anthropic #rag #context7
+Context7 (`/websites/platform_claude_en`, working-with-messages): the Messages array
+is alternating `{"role","content"}` turns. For RAG-with-memory, prior turns are
+**plain-text strings**; the retrieved `document` blocks (+ `citations`) go **only in
+the final/current user turn**, and the system prompt stays the top-level `system`
+param (so the ephemeral cache prefix isn't disturbed by history). Consecutive
+same-role messages are merged server-side. Loading the last N rows newest-first then
+`reversed()` gives chronological order for the prompt.
+
+### 2026-05-27 — Prompt 5: feedback callback can't carry Q/A — recover server-side, upsert for idempotency — #aiogram #idempotency
+👍/👎 buttons can't stuff the question/answer into the 64-byte callback budget. Pattern:
+persist the assistant turn → use its `messages.id` as the only callback payload
+(`FeedbackCB(rating, msg_ref)`), then recover (user, question, answer) from `messages`
+on tap (survives restarts). Idempotency = **upsert keyed by (user_id, question,
+answer)** (a 2nd tap updates the rating, never duplicates) PLUS removing the keyboard
+after the first tap (swallow "message is not modified"). Store the cited source
+**filenames** (parsed from the visible "Источник: …" footer) in `cited_source_ids` —
+more useful for the analytics loop than opaque UUIDs, and footer-parse needs no extra
+store. `InlineKeyboardBuilder().button(callback_data=<CB instance>)` packs for you.

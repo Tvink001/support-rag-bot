@@ -19,7 +19,7 @@ from anthropic.types import MessageParam, TextBlockParam
 
 from bot.config import Settings
 from bot.llm.prompts import SYSTEM_PROMPT
-from bot.models import RetrievedChunk
+from bot.models import ConversationTurn, RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,12 @@ class ClaudeClient:
         self._model = settings.ANTHROPIC_MODEL
         self._max_tokens = settings.ANTHROPIC_MAX_TOKENS
 
-    async def answer(self, question: str, chunks: list[RetrievedChunk]) -> AnswerResult:
+    async def answer(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        history: list[ConversationTurn] | None = None,
+    ) -> AnswerResult:
         system = cast(
             "list[TextBlockParam]",
             [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
@@ -62,9 +67,12 @@ class ClaudeClient:
             }
             for c in chunks
         ]
+        # Prior turns are plain text (§13); document blocks + citations live ONLY in
+        # the current question turn (Anthropic Messages API, Context7-verified 2026-05-27).
+        prior = [{"role": turn.role, "content": turn.content} for turn in (history or [])]
         messages = cast(
             "list[MessageParam]",
-            [{"role": "user", "content": [*documents, {"type": "text", "text": question}]}],
+            [*prior, {"role": "user", "content": [*documents, {"type": "text", "text": question}]}],
         )
 
         response = await self._client.messages.create(
