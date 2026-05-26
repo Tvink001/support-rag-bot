@@ -121,7 +121,7 @@ gate pipeline — **not** pinned from memory. Runtime: `aiogram==3.28.2`,
 `aiohttp==3.13.5`, `anthropic==0.104.1`, `voyageai==0.3.7`, `supabase==2.30.0`,
 `asyncpg==0.31.0`, `pgvector==0.4.2`, `groq==1.2.0`, `redis==7.4.0`,
 `pydantic==2.13.4`, `pydantic-settings==2.14.1`, `pypdf==6.12.2`,
-`python-docx==1.2.0`. Dev: `ruff==0.15.14`,
+`python-docx==1.2.0`, `truststore==0.10.4`. Dev: `ruff==0.15.14`,
 `mypy==2.1.0`, `pytest==9.0.3`, `pytest-asyncio==1.4.0`, `pytest-cov==7.1.0`.
 (Prompt 1's aiogram doc snapshot was 3.27.0; current pip stable is 3.28.2 — the
 webhook/FSM API used here is unchanged.) `asyncpg` + `pgvector` were added beyond
@@ -560,7 +560,7 @@ aiogram **workflow-data DI**. Admin (§16): `/upload` (FSM `Admin.awaiting_uploa
 
 ---
 
-## 11. RAG Pipeline: Retrieval `[filled — code in Prompt: Retrieval]`
+## 11. RAG Pipeline: Retrieval `[filled — code in Prompt 4]`
 
 Embed the question via Voyage (`input_type="query"`). v1 baseline = vector-only
 `match_chunks(top_k=RETRIEVAL_TOP_K, min_similarity=…)`. WOW 1 (§17) upgrades to
@@ -570,7 +570,7 @@ returned carry `source_id`/filename for citations.
 
 ---
 
-## 12. RAG Pipeline: Generation `[filled — code in Prompt: Generation]`
+## 12. RAG Pipeline: Generation `[filled — code in Prompt 4]`
 
 `bot/llm/claude_client.py` calls Anthropic Messages with Haiku 4.5:
 - **System prompt** (`bot/llm/prompts.py`, cached via `cache_control: ephemeral`):
@@ -589,6 +589,20 @@ returned carry `source_id`/filename for citations.
 - **Output:** answer text + citation metadata; post-verify cited text exists in
   the retrieved chunks; deliver with 👍/👎. If `needs_human` → escalate (§14).
 Anti-injection adversarial test is mandatory (§20).
+
+**Implementation (Prompt 4):** `claude_client.py` uses **citations only** (OQ-2 — no
+structured output), system prompt cached with `cache_control: ephemeral`, chunks as
+`document` blocks with citations enabled; parses `char_location` citations and
+post-verifies `cited_text` ∈ chunk. Retry = the anthropic SDK's built-in
+`max_retries` (exp backoff honoring `retry-after` on 429/529) — covers §9.2 without
+tenacity. `retrieve.py` = `embed_query` + `match_chunks(top_k)`; the **similarity
+gate** lives in `chat.py` (best < `SIMILARITY_THRESHOLD` → honest refusal, no LLM
+call). TLS: `truststore.inject_into_ssl()` at startup (corporate-proxy fix; §22).
+**Live cost ≈ $0.0076/answer** (in ≈ 6.5k tok, out ≈ 220 tok) — under the $0.02
+cap; **system-prompt caching did NOT engage** (`cache_creation_input_tokens=0`),
+confirming the ~400-token prompt is below Haiku's min cacheable length (§9.2 gap).
+Vector-only retrieval misses **SKU/article-number** lookups (`TH-2003` → 0.416 <
+threshold) → motivates WOW 1 hybrid search (§17).
 
 ---
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import truststore
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -16,7 +17,8 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 
 from bot.config import Settings, get_settings
-from bot.handlers import admin, start
+from bot.handlers import admin, chat, start
+from bot.llm.claude_client import ClaudeClient
 from bot.services.embeddings import EmbeddingService
 from bot.services.supabase_client import Database
 
@@ -60,12 +62,16 @@ def _build_storage(settings: Settings) -> BaseStorage:
     return MemoryStorage()
 
 
-def _build_dispatcher(settings: Settings, db: Database, embeddings: EmbeddingService) -> Dispatcher:
+def _build_dispatcher(
+    settings: Settings, db: Database, embeddings: EmbeddingService, claude: ClaudeClient
+) -> Dispatcher:
     dp = Dispatcher(storage=_build_storage(settings))
     dp["db"] = db  # injected into handlers declaring `db: Database`
     dp["embeddings"] = embeddings  # injected into handlers declaring `embeddings: EmbeddingService`
+    dp["claude"] = claude  # injected into handlers declaring `claude: ClaudeClient`
     dp.include_router(start.start_router)
     dp.include_router(admin.admin_router)
+    dp.include_router(chat.chat_router)  # last: commands match first, then free-text Q&A
     return dp
 
 
@@ -133,12 +139,16 @@ def _run_webhook(bot: Bot, dp: Dispatcher, settings: Settings, db: Database) -> 
 
 
 def main() -> None:
+    # Use the OS trust store so corporate-proxy / TLS-interception CAs are honored
+    # (Voyage/Anthropic/Supabase HTTPS via certifi otherwise fail; harmless on Railway).
+    truststore.inject_into_ssl()
     settings = get_settings()
     _configure_logging(settings)
     bot = _build_bot(settings)
     db = Database(settings.DATABASE_URL.get_secret_value())
     embeddings = EmbeddingService(settings)
-    dp = _build_dispatcher(settings, db, embeddings)
+    claude = ClaudeClient(settings)
+    dp = _build_dispatcher(settings, db, embeddings, claude)
     if settings.MODE == "webhook":
         _run_webhook(bot, dp, settings, db)
     else:

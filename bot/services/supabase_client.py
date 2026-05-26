@@ -16,7 +16,7 @@ from uuid import UUID
 
 import asyncpg
 
-from bot.models import Chunk, Source
+from bot.models import Chunk, RetrievedChunk, Source
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +140,32 @@ class Database:
             "from public.sources where status = 'active' order by uploaded_at desc"
         )
         return [Source.model_validate(dict(r)) for r in rows]
+
+    async def match_chunks(
+        self, query_embedding: list[float], match_count: int, min_similarity: float = 0.0
+    ) -> list[RetrievedChunk]:
+        """Vector-only cosine search via the match_chunks() SQL function (§11)."""
+        rows = await self.pool.fetch(
+            "select id, source_id, chunk_index, content, similarity, metadata, filename "
+            "from public.match_chunks($1::vector, $2, $3)",
+            _vector_literal(query_embedding),
+            match_count,
+            min_similarity,
+        )
+        chunks: list[RetrievedChunk] = []
+        for r in rows:
+            meta = r["metadata"]
+            if isinstance(meta, str):
+                meta = json.loads(meta)
+            chunks.append(
+                RetrievedChunk(
+                    id=r["id"],
+                    source_id=r["source_id"],
+                    chunk_index=r["chunk_index"],
+                    content=r["content"],
+                    similarity=r["similarity"],
+                    filename=r["filename"],
+                    metadata=meta or {},
+                )
+            )
+        return chunks

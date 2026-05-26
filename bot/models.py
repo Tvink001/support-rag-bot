@@ -33,3 +33,15 @@ class Chunk(BaseModel):
     token_count: int
     metadata: dict[str, Any] = Field(default_factory=dict)
     priority: int = 0
+
+
+class RetrievedChunk(BaseModel):
+    """A chunk returned by retrieval (``match_chunks``) with its similarity + source."""
+
+    id: UUID
+    source_id: UUID
+    chunk_index: int
+    content: str
+    similarity: float
+    filename: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
