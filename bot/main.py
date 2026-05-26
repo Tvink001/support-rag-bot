@@ -17,10 +17,11 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 
 from bot.config import Settings, get_settings
-from bot.handlers import admin, chat, escalation, feedback, start
+from bot.handlers import admin, chat, escalation, feedback, start, voice
 from bot.llm.claude_client import ClaudeClient
 from bot.services.embeddings import EmbeddingService
 from bot.services.supabase_client import Database
+from bot.services.whisper import WhisperService
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +64,22 @@ def _build_storage(settings: Settings) -> BaseStorage:
 
 
 def _build_dispatcher(
-    settings: Settings, db: Database, embeddings: EmbeddingService, claude: ClaudeClient
+    settings: Settings,
+    db: Database,
+    embeddings: EmbeddingService,
+    claude: ClaudeClient,
+    whisper: WhisperService,
 ) -> Dispatcher:
     dp = Dispatcher(storage=_build_storage(settings))
     dp["db"] = db  # injected into handlers declaring `db: Database`
     dp["embeddings"] = embeddings  # injected into handlers declaring `embeddings: EmbeddingService`
     dp["claude"] = claude  # injected into handlers declaring `claude: ClaudeClient`
+    dp["whisper"] = whisper  # injected into the voice handler
     dp.include_router(start.start_router)
     dp.include_router(admin.admin_router)
     dp.include_router(feedback.feedback_router)  # callback_query handlers (👍/👎)
     dp.include_router(escalation.escalation_router)  # Take/Suggest + manager reply capture
+    dp.include_router(voice.voice_router)  # voice -> transcribe -> RAG pipeline
     dp.include_router(chat.chat_router)  # last: commands match first, then free-text Q&A
     return dp
 
@@ -150,7 +157,8 @@ def main() -> None:
     db = Database(settings.DATABASE_URL.get_secret_value())
     embeddings = EmbeddingService(settings)
     claude = ClaudeClient(settings)
-    dp = _build_dispatcher(settings, db, embeddings, claude)
+    whisper = WhisperService(settings)
+    dp = _build_dispatcher(settings, db, embeddings, claude, whisper)
     if settings.MODE == "webhook":
         _run_webhook(bot, dp, settings, db)
     else:

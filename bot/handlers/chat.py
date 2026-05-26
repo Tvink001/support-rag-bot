@@ -45,9 +45,25 @@ async def handle_question(
     embeddings: EmbeddingService,
     claude: ClaudeClient,
 ) -> None:
+    """Text questions in private chats → the shared RAG pipeline."""
     question = message.text
     if not question:
         return
+    await answer_question(
+        message, question=question, bot=bot, db=db, embeddings=embeddings, claude=claude
+    )
+
+
+async def answer_question(
+    message: Message,
+    *,
+    question: str,
+    bot: Bot,
+    db: Database,
+    embeddings: EmbeddingService,
+    claude: ClaudeClient,
+) -> None:
+    """Shared pipeline for a question (text OR transcribed voice): gate → answer / escalate."""
     settings = get_settings()
     user = message.from_user
 

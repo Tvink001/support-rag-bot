@@ -692,13 +692,25 @@ user. The WOW 2 "Сохранить как FAQ?" offer hooks in here in Prompt 1
 
 ---
 
-## 15. Voice Input `[filled — code in Prompt: Voice]`
+## 15. Voice Input `[filled — code in Prompt 7]`
 
 `F.voice` handler: reject > ~1 MB; `bot.download` → bytes → `WhisperService`
 (Groq `AsyncGroq`, `whisper-large-v3-turbo`, `language` ru/uk auto or configured,
 `response_format="text"`) → feed transcript into the same chat pipeline (§11–§12).
 On API error: friendly fallback "не удалось распознать, напишите текстом", stay
 in flow, do NOT raise to the global handler. Reuses P2's `WhisperService`.
+
+**Built (Prompt 7):** `bot/services/whisper.py` (`WhisperService`, native `AsyncGroq`
+— no `to_thread`) + `bot/handlers/voice.py` (`F.voice & private`). The transcription
+call is `audio.transcriptions.create(model="whisper-large-v3-turbo", file=(name,
+bytes, "audio/ogg"), response_format="text"[, language])` (Context7-verified
+2026-05-27, `/groq/groq-python`); the result is handled as **either** a plain
+string **or** a `Transcription` object (`.text`), then stripped. The chat pipeline
+was refactored: `handle_question` (text) and `handle_voice` both call a shared
+`answer_question(message, *, question, …)` in `chat.py`, so voice reuses the exact
+memory→retrieve→answer/escalate path. `whisper` is injected via dispatcher
+workflow-data (`dp["whisper"]`). Cap = 1 MB at the handler; transcription failures
+fall back friendly and never reach the global error handler.
 
 ---
 

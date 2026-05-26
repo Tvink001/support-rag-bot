@@ -313,3 +313,16 @@ group state is per-manager and the **state filter** prevents it catching ordinar
 Per-user escalation cooldown lives in Postgres (`escalations.cooldown_until`), not FSM,
 so it survives redeploys. `from aiogram.utils.text_decorations import html_decoration`
 gives `.quote()` for safe HTML in manager posts; re-edit from `message.html_text`.
+
+### 2026-05-27 — Prompt 7: Groq transcription return shape + reuse the pipeline for voice — #groq #whisper #async
+`AsyncGroq` is natively async — `await client.audio.transcriptions.create(...)`, NO
+`asyncio.to_thread` (unlike the sync Voyage client). Signature (Context7
+`/groq/groq-python`): `model="whisper-large-v3-turbo"`, `file=(name, bytes,
+"audio/ogg")` (3-tuple; Telegram voice is OGG/OPUS), `response_format="text"`,
+optional `language`. The SDK types `create() -> Transcription`, but with
+`response_format="text"` it can return a **plain string** — handle both:
+`raw if isinstance(raw, str) else getattr(raw, "text", "")`, then `.strip()`. To feed
+voice through the SAME RAG path, refactor the text handler into a shared
+`answer_question(message, *, question, …)` that both the `F.text` and `F.voice`
+handlers call — no pipeline duplication. Transcription failure = user-flow event:
+friendly fallback, never raise to the global handler.
