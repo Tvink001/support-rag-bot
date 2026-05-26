@@ -18,7 +18,9 @@ from aiohttp import web
 
 from bot.config import Settings, get_settings
 from bot.handlers import admin, chat, escalation, feedback, start, voice
+from bot.handlers.errors import init_sentry, register_error_handler
 from bot.llm.claude_client import ClaudeClient
+from bot.middlewares import ThrottleMiddleware
 from bot.services.embeddings import EmbeddingService
 from bot.services.supabase_client import Database
 from bot.services.whisper import WhisperService
@@ -75,6 +77,12 @@ def _build_dispatcher(
     dp["embeddings"] = embeddings  # injected into handlers declaring `embeddings: EmbeddingService`
     dp["claude"] = claude  # injected into handlers declaring `claude: ClaudeClient`
     dp["whisper"] = whisper  # injected into the voice handler
+    dp.message.middleware(
+        ThrottleMiddleware(
+            min_interval_seconds=settings.RATE_LIMIT_INTERVAL_SECONDS,
+            llm_per_minute=settings.RATE_LIMIT_LLM_PER_MINUTE,
+        )
+    )
     dp.include_router(start.start_router)
     dp.include_router(admin.admin_router)
     dp.include_router(feedback.feedback_router)  # callback_query handlers (👍/👎)
@@ -153,12 +161,14 @@ def main() -> None:
     truststore.inject_into_ssl()
     settings = get_settings()
     _configure_logging(settings)
+    sentry_enabled = init_sentry(settings)
     bot = _build_bot(settings)
     db = Database(settings.DATABASE_URL.get_secret_value())
     embeddings = EmbeddingService(settings)
     claude = ClaudeClient(settings)
     whisper = WhisperService(settings)
     dp = _build_dispatcher(settings, db, embeddings, claude, whisper)
+    register_error_handler(dp, bot, settings, sentry_enabled=sentry_enabled)
     if settings.MODE == "webhook":
         _run_webhook(bot, dp, settings, db)
     else:

@@ -326,3 +326,20 @@ voice through the SAME RAG path, refactor the text handler into a shared
 `answer_question(message, *, question, …)` that both the `F.text` and `F.voice`
 handlers call — no pipeline duplication. Transcription failure = user-flow event:
 friendly fallback, never raise to the global handler.
+
+### 2026-05-27 — Prompt 8: aiogram middleware + global error handler + secret-redaction regex — #aiogram #error-handling #security
+(1) **Throttle middleware:** `class M(BaseMiddleware): async def __call__(self, handler,
+event, data)` → register `dp.message.middleware(M())`. Inject the clock (`time_func`)
+so window logic is testable without sleeping. (2) **Global error handler:** register on
+the **dispatcher** (`dp.errors.register(cb)`), NOT a sibling router — aiogram bubbles an
+unhandled exception up the router chain to the root, so only the dispatcher catches
+everything. `cb(event: ErrorEvent)` → `event.exception`. Log sanitized + `exc_info`;
+never log `event.update` (message body). (3) **Secret-redaction regex gotcha:** `\bkey\b`
+does NOT match inside `ANTHROPIC_API_KEY` (underscores are word chars → no boundary).
+Use `[\w-]*(?:token|key|secret|password|credential)[\w-]*\s*[=:]\s*(\S+)` and redact the
+value group. A long-base64 redactor will eat an all-alnum test string before truncation
+fires — test truncation with spaced words. (4) **Sentry** (`sentry-sdk==2.60.0`):
+lazy-import inside `init_sentry` so the dep is only needed when `SENTRY_DSN` is set;
+`AsyncioIntegration` + `EventScrubber` + `send_default_pii=False`; call
+`capture_exception` in the global handler (aiogram swallows the exception, so Sentry's
+auto-capture won't otherwise fire).

@@ -174,12 +174,21 @@ real `.env`, which carried an `.env.example` header, is gitignored).
 - Re-index cost guard: estimate tokens × Voyage price before a bulk `/upload`;
   alert if > $X `[TBD]`.
 
-### 3.3 — Rate limiting
+### 3.3 — Rate limiting `[filled — code in Prompt 8]`
 Per-user throttle middleware (aiogram): minimum interval between messages
-(~0.5–1 s), tighter on expensive commands. LLM-bearing path: cap per user
-(e.g. 10/min, 100/day) `[TBD via Prompt: Security]`. Respect Telegram's 30 msg/s
-global limit (sleep between fan-out sends). Distinguish Anthropic 429 (rate) vs
-529 (overload) with exponential backoff + jitter honoring `retry-after`.
+(~0.5–1 s), tighter on expensive commands. LLM-bearing path: cap per user.
+Respect Telegram's 30 msg/s global limit (sleep between fan-out sends).
+Distinguish Anthropic 429 (rate) vs 529 (overload) with exponential backoff +
+jitter honoring `retry-after` (handled by the SDK's `max_retries`, §9.2).
+
+**Built (Prompt 8):** `bot/middlewares.py::ThrottleMiddleware` on `dp.message`.
+Two windows, **in-memory per process** (single-instance v1; move to Redis for
+multi-instance): (a) `RATE_LIMIT_INTERVAL_SECONDS` (default 0.7) min interval
+between any two messages → floods are dropped silently; (b)
+`RATE_LIMIT_LLM_PER_MINUTE` (default 10) cap on LLM-bearing messages (free-text
+questions + voice; slash-commands bypass it) → over-cap gets a "подождите минуту"
+notice. The clock is injectable (`time_func`) so the windows are unit-tested
+without sleeping. Both vars added to `config.py` + `.env.example`.
 
 ---
 
@@ -714,7 +723,7 @@ fall back friendly and never reach the global error handler.
 
 ---
 
-## 16. Admin Commands & Feedback `[filled — code in Prompt: Admin/Feedback]`
+## 16. Admin Commands & Feedback `[filled — feedback in Prompt 5; admin /delete in Prompt 8]`
 
 `AdminFilter` checks `user_id ∈ ADMIN_TELEGRAM_IDS`; non-admins get one short
 "нет прав" reply. `/upload` (§10), `/sources` (list active sources: id, filename,
@@ -723,6 +732,16 @@ confirm count removed). **Feedback:** every answer ships `FeedbackCB(+1|-1)`
 inline buttons → insert into `feedback` with the question, answer, and cited
 source ids → toast "спасибо". Feedback powers the eval loop (top 👎 questions =
 what to add to the KB).
+
+**Built (Prompt 8) — admin `/delete`:** `/delete <id>` (admin-gated; the
+`AdminFilter` now accepts both `Message` and `CallbackQuery`) validates the UUID,
+shows the source name + chunk_count, and asks to confirm via
+`DeleteSourceCB(action=confirm|cancel, source_id)`. On confirm,
+`db.soft_delete_source` flips the source to `status='deleted'` (kept for audit)
+**and hard-deletes its chunks** in one transaction, returning the count removed;
+`match_chunks` already filters `status='active'`, so deleted sources vanish from
+retrieval. Idempotent: a repeat confirm returns `None` ("уже удалён"); the prompt
+buttons are stripped after the tap.
 
 **Built (Prompt 5) — feedback half:** `FeedbackCB(rating: int, msg_ref: str)`
 (prefix `fb`); `msg_ref` = the assistant `messages.id` the buttons hang under, so
@@ -846,14 +865,31 @@ Testing Trophy: static (ruff/mypy) → unit (pure logic only) → **integration
 - **Admin:** `user_id` whitelist; log unauthorized attempts.
 - **Deps:** `pip-audit` in CI (fail on high/critical).
 
+**Built (Prompt 8):** admin whitelist via `AdminFilter` (messages + callbacks);
+non-admins get one "нет прав"; rate limiting per §3.3; error-log secret redaction
+via `errors.sanitize`; the Q&A handler is private-chat-only (Prompt 6) so the
+managers' group is never RAG-answered.
+
 ---
 
-## 22. Observability `[filled]`
+## 22. Observability `[filled — code in Prompt 8]`
 
 - **Logging:** structured (`logger` + key-value extra: user_id, action,
   duration_ms); rotation; levels; never log secrets/PII. No `print()`.
 - **Error tracking:** Sentry (`sentry-sdk` asyncio integration) — `SENTRY_DSN`,
   free tier; set up before deploy.
+
+**Built (Prompt 8):** `bot/handlers/errors.py`. **Global handler** registered via
+`dp.errors.register(...)` (the dispatcher is the common ancestor, so it catches
+exceptions bubbling past the per-handler guards): logs the **sanitized** exception
++ traceback (never `event.update`, which holds the message body), forwards to
+Sentry (`capture_exception`) when enabled, and alerts `MANAGER_CHAT_ID`
+(`parse_mode=None`). **`sanitize`** (pure, tested): redacts `name=value` secrets
+(incl. underscore-joined names like `ANTHROPIC_API_KEY`), `Bearer …`, and 40+ char
+base64 runs, then truncates. **Sentry** (`sentry-sdk==2.60.0`, Context7-verified):
+`init_sentry(settings)` lazy-imports the SDK (only needed when `SENTRY_DSN` is set),
+inits with `AsyncioIntegration`, `send_default_pii=False`, and an `EventScrubber`.
+Anthropic usage tokens are already logged per answer (§12, Prompt 4).
 - **Cost tracking:** log Anthropic `usage.input_tokens`/`output_tokens` per call
   to a table/log; alert if daily spend > 2× average.
 - **Health:** `GET /health` → `200` JSON `{"status":"ok"}` (aiohttp route in

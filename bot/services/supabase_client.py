@@ -155,6 +155,34 @@ class Database:
         )
         return [Source.model_validate(dict(r)) for r in rows]
 
+    async def get_source(self, source_id: UUID) -> Source | None:
+        row = await self.pool.fetchrow(
+            "select id, filename, file_type, chunk_count, uploaded_at, status "
+            "from public.sources where id = $1",
+            source_id,
+        )
+        return Source.model_validate(dict(row)) if row is not None else None
+
+    async def soft_delete_source(self, source_id: UUID) -> int | None:
+        """Soft-delete an active source and hard-delete its chunks (atomic).
+
+        Returns the number of chunks removed, or ``None`` if the source was not
+        found / already deleted (so a repeat ``/delete`` is a clean no-op). The
+        source row is kept (status='deleted') for audit; only the vectors go.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "update public.sources set status = 'deleted' "
+                    "where id = $1 and status = 'active' returning chunk_count",
+                    source_id,
+                )
+                if row is None:
+                    return None
+                await conn.execute("delete from public.chunks where source_id = $1", source_id)
+        chunk_count: int = row["chunk_count"]
+        return chunk_count
+
     async def match_chunks(
         self, query_embedding: list[float], match_count: int, min_similarity: float = 0.0
     ) -> list[RetrievedChunk]:

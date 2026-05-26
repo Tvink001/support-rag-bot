@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     CONVERSATION_MEMORY_TURNS: int = 20
     ESCALATION_COOLDOWN_HOURS: int = 24
 
+    # --- Rate limiting (§3.3) ---
+    RATE_LIMIT_INTERVAL_SECONDS: float = Field(default=0.7, ge=0.0)
+    RATE_LIMIT_LLM_PER_MINUTE: int = Field(default=10, ge=1)
+
     # --- Mode / web server ---
     MODE: Literal["polling", "webhook"] = "polling"
     WEB_HOST: str = "0.0.0.0"

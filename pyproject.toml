@@ -23,6 +23,7 @@ dependencies = [
   "pypdf==6.12.2",
   "python-docx==1.2.0",
   "truststore==0.10.4",
+  "sentry-sdk==2.60.0",
 ]
 
 [project.optional-dependencies]
