@@ -18,7 +18,7 @@ from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam, TextBlockParam
 
 from bot.config import Settings
-from bot.llm.prompts import SYSTEM_PROMPT
+from bot.llm.prompts import ESCALATION_SENTINEL, SYSTEM_PROMPT
 from bot.models import ConversationTurn, RetrievedChunk
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ class AnswerResult:
     output_tokens: int
     cache_read_tokens: int
     cache_creation_tokens: int
+    needs_human: bool = False  # Claude emitted the escalation sentinel (§14)
 
 
 class ClaudeClient:
@@ -100,12 +101,18 @@ class ClaudeClient:
                 if isinstance(title, str) and title and title not in sources:
                     sources.append(title)
 
+        text = "".join(parts).strip()
+        # Claude signals "can't answer from this context" by emitting the sentinel
+        # (OQ-2: citations preclude structured output). Don't surface the token.
+        needs_human = ESCALATION_SENTINEL in text
+
         usage = response.usage
         return AnswerResult(
-            text="".join(parts).strip(),
-            sources=sources,
+            text="" if needs_human else text,
+            sources=[] if needs_human else sources,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             cache_read_tokens=usage.cache_read_input_tokens or 0,
             cache_creation_tokens=usage.cache_creation_input_tokens or 0,
+            needs_human=needs_human,
         )

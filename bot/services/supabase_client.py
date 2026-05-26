@@ -12,17 +12,31 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 from uuid import UUID
 
 import asyncpg
 
-from bot.models import Chunk, ConversationTurn, FeedbackContext, RetrievedChunk, Source
+from bot.models import (
+    Chunk,
+    ConversationTurn,
+    Escalation,
+    FeedbackContext,
+    RetrievedChunk,
+    Source,
+)
 
 logger = logging.getLogger(__name__)
 
 _CONNECT_RETRIES = 5
 _CONNECT_TIMEOUT_SECONDS = 10.0
 _CONNECT_BACKOFF_SECONDS = 1.0
+
+# Full column list for the escalations table (maps 1:1 to the Escalation model).
+_ESCALATION_COLS = (
+    "id, user_id, question, status, manager_id, manager_msg_id, "
+    "taken_at, resolved_at, resolution_text, cooldown_until, created_at"
+)
 
 
 def _vector_literal(embedding: list[float]) -> str:
@@ -258,3 +272,64 @@ class Database:
                     payload,
                 )
         return True
+
+    # --- escalations (§14) ----------------------------------------------------
+    async def get_active_escalation(self, user_id: int) -> Escalation | None:
+        """The user's still-active escalation: open, or taken within its cooldown."""
+        row = await self.pool.fetchrow(
+            f"select {_ESCALATION_COLS} from public.escalations "
+            "where user_id = $1 "
+            "  and (status = 'open' or (status = 'taken' and cooldown_until > now())) "
+            "order by created_at desc limit 1",
+            user_id,
+        )
+        return Escalation.model_validate(dict(row)) if row is not None else None
+
+    async def create_escalation(self, user_id: int, question: str) -> UUID:
+        """Open a new escalation; return its id."""
+        escalation_id: UUID = await self.pool.fetchval(
+            "insert into public.escalations (user_id, question, status) "
+            "values ($1, $2, 'open') returning id",
+            user_id,
+            question,
+        )
+        return escalation_id
+
+    async def set_escalation_manager_msg(self, escalation_id: UUID, manager_msg_id: int) -> None:
+        """Record the managers'-chat message id (so the post can be edited later)."""
+        await self.pool.execute(
+            "update public.escalations set manager_msg_id = $2 where id = $1",
+            escalation_id,
+            manager_msg_id,
+        )
+
+    async def take_escalation(
+        self, escalation_id: UUID, manager_id: int, cooldown_until: datetime
+    ) -> bool:
+        """Transition open → taken (idempotent). True if this call did the transition.
+
+        Only an ``open`` escalation flips, so a double-tap of *Взять* is a no-op
+        (returns False) — write-after-success: the cooldown is set only here.
+        """
+        updated = await self.pool.fetchval(
+            "update public.escalations "
+            "set status = 'taken', manager_id = $2, taken_at = now(), cooldown_until = $3 "
+            "where id = $1 and status = 'open' returning id",
+            escalation_id,
+            manager_id,
+            cooldown_until,
+        )
+        return updated is not None
+
+    async def resolve_escalation(
+        self, escalation_id: UUID, resolution_text: str
+    ) -> Escalation | None:
+        """Mark an open/taken escalation resolved with the manager's reply; return the row."""
+        row = await self.pool.fetchrow(
+            "update public.escalations "
+            "set status = 'resolved', resolution_text = $2, resolved_at = now() "
+            f"where id = $1 and status in ('open', 'taken') returning {_ESCALATION_COLS}",
+            escalation_id,
+            resolution_text,
+        )
+        return Escalation.model_validate(dict(row)) if row is not None else None

@@ -295,3 +295,21 @@ after the first tap (swallow "message is not modified"). Store the cited source
 **filenames** (parsed from the visible "Источник: …" footer) in `cited_source_ids` —
 more useful for the analytics loop than opaque UUIDs, and footer-parse needs no extra
 store. `InlineKeyboardBuilder().button(callback_data=<CB instance>)` packs for you.
+
+### 2026-05-27 — Prompt 6: needs_human via a text sentinel (citations block structured output) — #anthropic #rag
+OQ-2 says native citations and `output_config.format` can't combine, so there's no
+JSON `{needs_human: bool}` next to a cited answer. Workaround: the system prompt tells
+Claude to emit EXACTLY `[[ESCALATE]]` (a constant `ESCALATION_SENTINEL`) when the
+retrieved context can't answer; the client does `needs_human = SENTINEL in text` and
+blanks the visible text. Clean, cheap, and keeps the answer call citations-only. The
+rule-4 "ты какая модель?" override still wins (it answers, doesn't escalate).
+
+### 2026-05-27 — Prompt 6: restrict the Q&A handler to private chats; manager FSM in a group — #aiogram #telegram
+With the bot admin in the managers' group (privacy disabled for §18/WOW2), EVERY group
+message would otherwise hit the RAG handler → noise + cost. Fix: gate the chat handler
+with `F.chat.type == "private"`. The manager "Предложить ответ" reply-capture uses
+aiogram FSM (`ManagerFlow.awaiting_suggestion`) — FSM keys on (chat_id, user_id), so a
+group state is per-manager and the **state filter** prevents it catching ordinary users.
+Per-user escalation cooldown lives in Postgres (`escalations.cooldown_until`), not FSM,
+so it survives redeploys. `from aiogram.utils.text_decorations import html_decoration`
+gives `.quote()` for safe HTML in manager posts; re-edit from `message.html_text`.

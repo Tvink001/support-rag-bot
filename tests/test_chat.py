@@ -1,7 +1,8 @@
-"""Tests for the answer path: citation parsing + the below-threshold gate."""
+"""Tests for the chat path: citations, escalation triggers, memory + feedback."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -9,7 +10,7 @@ from uuid import uuid4
 from bot.config import Settings
 from bot.handlers.chat import handle_question
 from bot.llm.claude_client import ClaudeClient
-from bot.models import RetrievedChunk
+from bot.models import Escalation, RetrievedChunk
 
 _DIM = 1024
 
@@ -73,24 +74,98 @@ async def test_claude_answer_parses_citations() -> None:
     assert result.cache_creation_tokens == 1100
 
 
-async def test_below_threshold_returns_honest_without_calling_claude() -> None:
+async def test_below_threshold_escalates_without_calling_claude() -> None:
     db = AsyncMock()
-    db.match_chunks.return_value = [
-        _chunk("нерелевантный текст", similarity=0.2, filename="x.docx")
-    ]
+    db.get_active_escalation.return_value = None
+    db.match_chunks.return_value = [_chunk("нерелевантный текст", 0.2, "x.docx")]
+    db.create_escalation.return_value = uuid4()
     claude = AsyncMock()
+    bot = AsyncMock()
+    bot.send_message.return_value = SimpleNamespace(message_id=1)
     message = AsyncMock()
     message.text = "вопрос, которого нет в базе"
+    message.from_user = SimpleNamespace(id=555, full_name="U", username=None)
 
-    await handle_question(message, db=db, embeddings=_FakeEmbeddings(), claude=claude)
+    await handle_question(message, bot=bot, db=db, embeddings=_FakeEmbeddings(), claude=claude)
+
+    claude.answer.assert_not_awaited()  # no LLM call below the similarity threshold
+    db.create_escalation.assert_awaited_once()  # escalation opened
+    bot.send_message.assert_awaited_once()  # posted to the managers' chat
+    message.answer.assert_awaited()  # user told honestly
+    assert "менеджер" in message.answer.await_args.args[0]
+
+
+async def test_needs_human_escalates_after_answer() -> None:
+    db = AsyncMock()
+    db.get_active_escalation.return_value = None
+    db.match_chunks.return_value = [_chunk("какой-то контекст", 0.9, "faq.docx")]
+    db.load_recent_messages.return_value = []
+    db.create_escalation.return_value = uuid4()
+    claude = AsyncMock()
+    claude.answer.return_value = SimpleNamespace(
+        text="",
+        sources=[],
+        needs_human=True,
+        input_tokens=10,
+        output_tokens=0,
+        cache_read_tokens=0,
+        cache_creation_tokens=0,
+    )
+    bot = AsyncMock()
+    bot.send_message.return_value = SimpleNamespace(message_id=2)
+    message = AsyncMock()
+    message.text = "вопрос есть, но не в этих чанках"
+    message.from_user = SimpleNamespace(id=9, full_name="U", username=None)
+
+    await handle_question(message, bot=bot, db=db, embeddings=_FakeEmbeddings(), claude=claude)
+
+    claude.answer.assert_awaited_once()
+    db.create_escalation.assert_awaited_once()  # escalated despite an above-threshold hit
+    db.append_message.assert_not_awaited()  # a non-answer is not persisted to memory
+
+
+async def test_cooldown_keeps_bot_silent() -> None:
+    db = AsyncMock()
+    db.get_active_escalation.return_value = Escalation(
+        id=uuid4(),
+        user_id=7,
+        question="q",
+        status="taken",
+        cooldown_until=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    message = AsyncMock()
+    message.text = "ещё вопрос"
+    message.from_user = SimpleNamespace(id=7)
+
+    await handle_question(
+        message, bot=AsyncMock(), db=db, embeddings=_FakeEmbeddings(), claude=AsyncMock()
+    )
+
+    message.answer.assert_not_awaited()  # silent during cooldown
+    db.match_chunks.assert_not_awaited()  # didn't even retrieve
+
+
+async def test_open_escalation_reassures_without_re_escalating() -> None:
+    db = AsyncMock()
+    db.get_active_escalation.return_value = Escalation(
+        id=uuid4(), user_id=7, question="q", status="open"
+    )
+    message = AsyncMock()
+    message.text = "ещё"
+    message.from_user = SimpleNamespace(id=7)
+
+    await handle_question(
+        message, bot=AsyncMock(), db=db, embeddings=_FakeEmbeddings(), claude=AsyncMock()
+    )
 
     message.answer.assert_awaited_once()
-    assert "менеджеру" in message.answer.await_args.args[0]
-    claude.answer.assert_not_awaited()  # no LLM call below the similarity threshold
+    assert "уже" in message.answer.await_args.args[0].lower()
+    db.create_escalation.assert_not_awaited()  # no duplicate escalation
 
 
 async def test_answer_path_loads_memory_persists_and_attaches_feedback() -> None:
     db = AsyncMock()
+    db.get_active_escalation.return_value = None
     db.match_chunks.return_value = [_chunk("Доставка курьером в день заказа.", 0.81, "faq.docx")]
     db.load_recent_messages.return_value = []  # no prior turns
     db.append_message.return_value = 77  # stand-in assistant messages.id
@@ -99,6 +174,7 @@ async def test_answer_path_loads_memory_persists_and_attaches_feedback() -> None
     claude.answer.return_value = SimpleNamespace(
         text="Доставка в день заказа.",
         sources=["faq.docx"],
+        needs_human=False,
         input_tokens=1000,
         output_tokens=20,
         cache_read_tokens=0,
@@ -109,7 +185,9 @@ async def test_answer_path_loads_memory_persists_and_attaches_feedback() -> None
     message.text = "Сколько идёт доставка?"
     message.from_user = SimpleNamespace(id=555)
 
-    await handle_question(message, db=db, embeddings=_FakeEmbeddings(), claude=claude)
+    await handle_question(
+        message, bot=AsyncMock(), db=db, embeddings=_FakeEmbeddings(), claude=claude
+    )
 
     claude.answer.assert_awaited_once()
     assert claude.answer.await_args.kwargs["history"] == []  # memory loaded + passed

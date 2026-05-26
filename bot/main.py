@@ -17,7 +17,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 
 from bot.config import Settings, get_settings
-from bot.handlers import admin, chat, feedback, start
+from bot.handlers import admin, chat, escalation, feedback, start
 from bot.llm.claude_client import ClaudeClient
 from bot.services.embeddings import EmbeddingService
 from bot.services.supabase_client import Database
@@ -72,6 +72,7 @@ def _build_dispatcher(
     dp.include_router(start.start_router)
     dp.include_router(admin.admin_router)
     dp.include_router(feedback.feedback_router)  # callback_query handlers (👍/👎)
+    dp.include_router(escalation.escalation_router)  # Take/Suggest + manager reply capture
     dp.include_router(chat.chat_router)  # last: commands match first, then free-text Q&A
     return dp
 

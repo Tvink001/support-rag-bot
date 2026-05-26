@@ -60,3 +60,19 @@ class FeedbackContext(BaseModel):
     user_id: int
     question: str
     answer: str
+
+
+class Escalation(BaseModel):
+    """A row of the ``escalations`` table — a manager hand-off (§14)."""
+
+    id: UUID
+    user_id: int
+    question: str
+    status: str  # open | taken | resolved
+    manager_id: int | None = None
+    manager_msg_id: int | None = None
+    taken_at: datetime | None = None
+    resolved_at: datetime | None = None
+    resolution_text: str | None = None
+    cooldown_until: datetime | None = None
+    created_at: datetime | None = None

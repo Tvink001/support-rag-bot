@@ -652,7 +652,7 @@ revisited with escalation in Prompt 6).
 
 ---
 
-## 14. Escalation to Manager `[filled — code in Prompt: Escalation]`
+## 14. Escalation to Manager `[filled — code in Prompt 6]`
 
 Trigger: retrieval below threshold (§11) OR Claude `needs_human` (§12), OR an
 already-open escalation for the user. Flow:
@@ -671,6 +671,24 @@ already-open escalation for the user. Flow:
 Write-after-success ordering (P1/P2 `#idempotency`): only flip status after the
 side effect (Telegram post / DB write) succeeds. Double-clicks are no-ops
 ("message is not modified" handled).
+
+**Built (Prompt 6):** `bot/handlers/escalation.py`. Triggers wired in
+`bot/handlers/chat.py`: (a) below-threshold (`is_below_threshold`, pure), (b)
+Claude `needs_human`, (c) an already-active escalation. **`needs_human` signal:**
+since citations preclude structured output (OQ-2), `bot/llm/prompts.py` defines
+`ESCALATION_SENTINEL = "[[ESCALATE]]"` — Claude emits exactly that token when the
+context can't answer; `ClaudeClient.answer` maps it to `AnswerResult.needs_human`
+(and blanks the text). **Cooldown gate:** the chat handler is now restricted to
+**private** chats (so the bot never RAG-answers in the managers' group) and, at
+the very top, calls `get_active_escalation(user_id)` → stays **silent** while a
+taken escalation's `cooldown_until > now` (`is_in_cooldown`, pure), or reassures
+("уже передан менеджеру") while still `open` (no duplicate escalation). **Take:**
+`take_escalation` flips `open → taken` only (idempotent), sets `manager_id`,
+`taken_at`, `cooldown_until = now + ESCALATION_COOLDOWN_HOURS`, strikes the buttons.
+**Suggest:** sets manager FSM `ManagerFlow.awaiting_suggestion` (state-filtered, so
+it can't catch normal users); the manager's next message is stored as
+`resolution_text`, the escalation is `resolved`, and the reply is relayed to the
+user. The WOW 2 "Сохранить как FAQ?" offer hooks in here in Prompt 10.
 
 ---
 
