@@ -125,6 +125,46 @@ as $$
     limit match_count;
 $$;
 
+-- --- keyword_search: full-text (BM25-style) arm for hybrid retrieval (WOW 1, §17) ---
+-- Ranks chunks whose generated `fts` matches the query (ts_rank_cd over the
+-- websearch tsquery), and ALSO returns the cosine similarity so the hybrid gate has
+-- a real number even for keyword-only hits. 'simple' config matches the fts column.
+-- Verified via Context7 (/llmstxt/supabase_llms-full_txt, hybrid-search, 2026-05-27).
+create or replace function public.keyword_search(
+    query_embedding vector(1024),
+    query_text      text,
+    match_count     int default 5
+) returns table (
+    id          uuid,
+    source_id   uuid,
+    chunk_index int,
+    content     text,
+    similarity  float,
+    rank        float,
+    metadata    jsonb,
+    filename    text
+)
+language sql
+stable
+set search_path = extensions, public, pg_temp
+as $$
+    select
+        c.id,
+        c.source_id,
+        c.chunk_index,
+        c.content,
+        1 - (c.embedding <=> query_embedding) as similarity,
+        ts_rank_cd(c.fts, websearch_to_tsquery('simple', query_text)) as rank,
+        c.metadata,
+        s.filename
+    from public.chunks c
+    join public.sources s on s.id = c.source_id
+    where s.status = 'active'
+      and c.fts @@ websearch_to_tsquery('simple', query_text)
+    order by rank desc
+    limit match_count;
+$$;
+
 -- --- RLS: deny-by-default (the bot connects as the table owner / service_role,
 --     both of which bypass RLS; this only locks down the public PostgREST API). §21
 alter table public.sources     enable row level security;

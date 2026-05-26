@@ -50,9 +50,17 @@ class ManagerFlow(StatesGroup):
 
 
 # --- pure helpers (unit-tested; no aiogram/DB deps) --------------------------
-def is_below_threshold(best_similarity: float, threshold: float, has_chunks: bool) -> bool:
-    """The retrieval-gate escalation trigger (§11/§14)."""
-    return (not has_chunks) or best_similarity < threshold
+def is_below_threshold(
+    best_similarity: float, threshold: float, has_chunks: bool, keyword_hit: bool = False
+) -> bool:
+    """The retrieval-gate escalation trigger (§11/§14/§17).
+
+    Escalate when there are no chunks, or the vector arm is weak AND the keyword arm
+    didn't match — so a strong keyword/SKU hit (low cosine) is answered, not escalated.
+    """
+    if not has_chunks:
+        return True
+    return best_similarity < threshold and not keyword_hit
 
 
 def is_in_cooldown(status: str, cooldown_until: datetime | None, now: datetime) -> bool:

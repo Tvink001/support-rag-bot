@@ -49,6 +49,22 @@ async def _set_search_path(conn: asyncpg.Connection) -> None:
     await conn.execute("set search_path = public, extensions")
 
 
+def _row_to_chunk(row: asyncpg.Record) -> RetrievedChunk:
+    """Map a retrieval row (match_chunks / keyword_search) to a ``RetrievedChunk``."""
+    meta = row["metadata"]
+    if isinstance(meta, str):
+        meta = json.loads(meta)
+    return RetrievedChunk(
+        id=row["id"],
+        source_id=row["source_id"],
+        chunk_index=row["chunk_index"],
+        content=row["content"],
+        similarity=row["similarity"],
+        filename=row["filename"],
+        metadata=meta or {},
+    )
+
+
 class Database:
     """asyncpg connection pool + the queries ingestion/admin need."""
 
@@ -194,23 +210,24 @@ class Database:
             match_count,
             min_similarity,
         )
-        chunks: list[RetrievedChunk] = []
-        for r in rows:
-            meta = r["metadata"]
-            if isinstance(meta, str):
-                meta = json.loads(meta)
-            chunks.append(
-                RetrievedChunk(
-                    id=r["id"],
-                    source_id=r["source_id"],
-                    chunk_index=r["chunk_index"],
-                    content=r["content"],
-                    similarity=r["similarity"],
-                    filename=r["filename"],
-                    metadata=meta or {},
-                )
-            )
-        return chunks
+        return [_row_to_chunk(r) for r in rows]
+
+    async def keyword_search(
+        self, query_embedding: list[float], query_text: str, match_count: int
+    ) -> list[RetrievedChunk]:
+        """Full-text (BM25-style) arm of hybrid search, ranked by ts_rank_cd (§17).
+
+        Returns only chunks whose ``fts`` matches the query, ordered by keyword rank;
+        each row also carries its cosine ``similarity`` (for the hybrid gate).
+        """
+        rows = await self.pool.fetch(
+            "select id, source_id, chunk_index, content, similarity, metadata, filename "
+            "from public.keyword_search($1::vector, $2, $3)",
+            _vector_literal(query_embedding),
+            query_text,
+            match_count,
+        )
+        return [_row_to_chunk(r) for r in rows]
 
     # --- conversation memory (§13) -------------------------------------------
     async def append_message(self, user_id: int, role: str, content: str) -> int:

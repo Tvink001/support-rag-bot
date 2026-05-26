@@ -78,6 +78,7 @@ async def test_below_threshold_escalates_without_calling_claude() -> None:
     db = AsyncMock()
     db.get_active_escalation.return_value = None
     db.match_chunks.return_value = [_chunk("нерелевантный текст", 0.2, "x.docx")]
+    db.keyword_search.return_value = []  # FTS arm also found nothing
     db.create_escalation.return_value = uuid4()
     claude = AsyncMock()
     bot = AsyncMock()
@@ -99,6 +100,7 @@ async def test_needs_human_escalates_after_answer() -> None:
     db = AsyncMock()
     db.get_active_escalation.return_value = None
     db.match_chunks.return_value = [_chunk("какой-то контекст", 0.9, "faq.docx")]
+    db.keyword_search.return_value = []
     db.load_recent_messages.return_value = []
     db.create_escalation.return_value = uuid4()
     claude = AsyncMock()
@@ -167,6 +169,7 @@ async def test_answer_path_loads_memory_persists_and_attaches_feedback() -> None
     db = AsyncMock()
     db.get_active_escalation.return_value = None
     db.match_chunks.return_value = [_chunk("Доставка курьером в день заказа.", 0.81, "faq.docx")]
+    db.keyword_search.return_value = []
     db.load_recent_messages.return_value = []  # no prior turns
     db.append_message.return_value = 77  # stand-in assistant messages.id
 
@@ -196,3 +199,34 @@ async def test_answer_path_loads_memory_persists_and_attaches_feedback() -> None
     sent_text = message.answer.await_args.args[0]
     assert "Источник: faq.docx" in sent_text
     assert message.answer.await_args.kwargs["reply_markup"] is not None  # feedback buttons
+
+
+async def test_keyword_hit_rescues_low_cosine_answer() -> None:
+    """WOW 1: a rare-term/SKU hit found by FTS (low cosine) is answered, not escalated."""
+    db = AsyncMock()
+    db.get_active_escalation.return_value = None
+    sku_chunk = _chunk("Артикул TH-2003: гарантия 24 месяца.", 0.42, "catalog.docx")
+    db.match_chunks.return_value = [sku_chunk]  # vector arm weak (0.42 < 0.6)
+    db.keyword_search.return_value = [sku_chunk]  # but FTS nails the SKU
+    db.load_recent_messages.return_value = []
+    db.append_message.return_value = 5
+    claude = AsyncMock()
+    claude.answer.return_value = SimpleNamespace(
+        text="Гарантия 24 месяца.",
+        sources=["catalog.docx"],
+        needs_human=False,
+        input_tokens=10,
+        output_tokens=5,
+        cache_read_tokens=0,
+        cache_creation_tokens=0,
+    )
+    message = AsyncMock()
+    message.text = "гарантия на TH-2003?"
+    message.from_user = SimpleNamespace(id=5)
+
+    await handle_question(
+        message, bot=AsyncMock(), db=db, embeddings=_FakeEmbeddings(), claude=claude
+    )
+
+    claude.answer.assert_awaited_once()  # answered despite low cosine
+    db.create_escalation.assert_not_awaited()  # keyword hit prevented escalation

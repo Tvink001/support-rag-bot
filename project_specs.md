@@ -757,7 +757,7 @@ analytics loop. `/delete <id>` + the rest of admin polish remains **Prompt 8**.
 
 ---
 
-## 17. WOW 1 — Hybrid Search (BM25 + RRF) `[TBD via Prompt: WOW 1]`
+## 17. WOW 1 — Hybrid Search (BM25 + RRF) `[filled — code in Prompt 9]`
 
 Run two retrievers and fuse: **vector** (pgvector cosine) + **keyword** (Postgres
 `tsvector`/`ts_rank` — the BM25 arm; an alternative pure-Python `rank_bm25` path
@@ -766,6 +766,21 @@ is documented as fallback). Fuse with **Reciprocal Rank Fusion**:
 unit-tested) or in the `hybrid_search` SQL function — decided here via Context7.
 Expected +15–20% on rare terms / article numbers / SKUs. Must show a measurable
 lift on the golden set vs vector-only (§19).
+
+**Built (Prompt 9) — resolves OQ-3:** Decision = **RRF in Python**
+(`bot/rag/rrf.py`, pure + unit-tested), not a SQL `hybrid_search` — the prompt
+mandates a tested pure fusion fn, it reuses the existing `match_chunks` vector arm,
+and keeps fusion offline-testable. The keyword arm is a new SQL fn
+`keyword_search(query_embedding, query_text, match_count)` (`db/schema.sql`):
+`ts_rank_cd` over the generated `fts` with `websearch_to_tsquery('simple', …)`
+(matches the 'simple' fts config; Context7 `/llmstxt/supabase_llms-full_txt`). It
+also returns each hit's cosine similarity, so the gate has a real number even for
+keyword-only hits. `retrieve()` runs both arms (top-k each), fuses ids via
+`reciprocal_rank_fusion` (k=60), and returns the fused top-k + `best_similarity`
+(max cosine) + `keyword_hit`. **Gate update (§14):** `is_below_threshold` now
+escalates only when the vector arm is weak AND `keyword_hit` is false — so a rare
+term / SKU the vector arm misses (e.g. `TH-2003` at cosine ~0.42) is answered, not
+escalated. Golden-set lift is quantified in Prompt 11.
 
 ---
 
@@ -944,14 +959,13 @@ Chroma brief). Supabase free tier hosts vectors + state; backup posture per §19
   uses **citations only**; `needs_human` = retrieval gate (§11) + a system-prompt
   **sentinel** parsed from the cited answer; a separate structured-output classify
   call is the fallback. See §9.2; implemented in §12.
-- **OQ-3 (BM25 arm + RRF placement) — 📌 NOTED → WOW-1 prompt.** Context7 confirms
-  the official Supabase pattern does **RRF in SQL** (`hybrid_search`: `ts_rank_cd`
-  + `websearch_to_tsquery` + `<=>`), so v1 leans SQL-side RRF; pure-Python
-  `rank_bm25` stays a documented fallback; `bot/rag/rrf.py` stays a pure
-  unit-tested helper regardless. **New sub-item:** choose the FTS `tsvector`
-  **language config for RU/UK** — Postgres ships a `russian` config but **no
-  `ukrainian`**; default to `'simple'` (tokenize+lowercase, no stemming) or
-  per-doc language, decided when defining the `fts` generated column (Schema/WOW-1).
+- **OQ-3 (BM25 arm + RRF placement) — ✅ RESOLVED 2026-05-27 (Prompt 9).** Chose
+  **RRF in Python** (`bot/rag/rrf.py`, pure + unit-tested) over SQL-side RRF: the
+  keyword arm is the SQL fn `keyword_search` (`ts_rank_cd` + `websearch_to_tsquery`
+  + cosine), but the *fusion* is the pure Python helper (reuses `match_chunks`,
+  testable offline). `rank_bm25` remains a documented fallback (unused). The FTS
+  language config sub-item is settled: the generated `fts` column uses **`'simple'`**
+  (tokenize+lowercase, no stemming) — language-agnostic for RU/UK/EN (§7, Prompt 3).
 - **OQ-4 (hybrid query transport) — ✅ RESOLVED 2026-05-26.** **supabase-py async
   `rpc()`** is the default (`await client.rpc("hybrid_search", {...}).execute()`);
   direct `asyncpg`/`DATABASE_URL` is the documented fallback. See §9.4.

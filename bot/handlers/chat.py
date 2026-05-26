@@ -89,9 +89,12 @@ async def answer_question(
         await message.answer(_ERROR_REPLY)
         return
 
-    # Retrieval-gate trigger: if even the best chunk is too weak, escalate (no LLM call).
+    # Retrieval-gate trigger: escalate only if the vector arm is weak AND no keyword hit.
     if is_below_threshold(
-        result.best_similarity, settings.SIMILARITY_THRESHOLD, bool(result.chunks)
+        result.best_similarity,
+        settings.SIMILARITY_THRESHOLD,
+        bool(result.chunks),
+        result.keyword_hit,
     ):
         logger.info("below-threshold (best=%.3f) -> escalating", result.best_similarity)
         await escalate(message, db=db, bot=bot, question=question, user=user)

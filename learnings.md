@@ -343,3 +343,16 @@ lazy-import inside `init_sentry` so the dep is only needed when `SENTRY_DSN` is 
 `AsyncioIntegration` + `EventScrubber` + `send_default_pii=False`; call
 `capture_exception` in the global handler (aiogram swallows the exception, so Sentry's
 auto-capture won't otherwise fire).
+
+### 2026-05-27 — Prompt 9: hybrid = SQL keyword arm + PYTHON RRF; gate must respect keyword hits — #rag #pgvector
+WOW 1. Fuse vector + FTS with RRF `Σ 1/(k+rank)`, k=60. Chose **Python fusion**
+(`bot/rag/rrf.py`, pure) over Supabase's SQL `hybrid_search` so the fusion is unit-tested
+offline and reuses `match_chunks`. Keyword arm = SQL fn `keyword_search`: `ts_rank_cd(fts,
+websearch_to_tsquery('simple', q))`, filter `fts @@ …`, ALSO return `1-(embedding<=>q)` so
+keyword-only hits still carry a cosine for the gate. **Load-bearing gate fix:** RRF scores
+(~0.03) are NOT comparable to the cosine `SIMILARITY_THRESHOLD` (0.6), and the whole point of
+hybrid is that a rare term/SKU has LOW cosine but a strong keyword match — so the escalation
+gate must become "vector weak AND no keyword hit", else WOW 1's wins get escalated away. Keep
+`best_similarity` = max cosine for display/logging; add a `keyword_hit` bool for the gate.
+The 'simple' tsconfig (RU/UK-safe) must match between the generated `fts` column and the query
+`websearch_to_tsquery('simple', …)`. Operator must run the new `keyword_search` fn in Supabase.
