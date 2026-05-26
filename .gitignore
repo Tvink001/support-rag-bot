@@ -1,0 +1,69 @@
+# =============================================================================
+# P4_RAG — .gitignore
+# Protects secrets and local artifacts. Before the first `git add .`, confirm
+# `git status` does NOT show: .env, .mcp.json, secrets/, *.log, or any key file.
+# =============================================================================
+
+# --- Secrets — NEVER commit --------------------------------------------------
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+secrets/*
+!secrets/README.md
+*.pem
+*-credentials.json
+service-account*.json
+
+# Claude Code MCP config holds operator-specific paths and may hold secrets
+# (see learnings.md, project_specs.md §4). Commit only the template in the spec.
+.mcp.json
+
+# --- Logs --------------------------------------------------------------------
+*.log
+logs/
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+.coverage.*
+htmlcov/
+pip-log.txt
+
+# --- Local golden / eval data — sidecar JSON + README committed, sources not --
+test-data/golden/*.pdf
+test-data/golden/*.PDF
+test-data/golden/*.docx
+test-data/golden/*.txt
+test-data/scratch/
+
+# --- IDE / editors -----------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# --- OS junk -----------------------------------------------------------------
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# --- Claude / agent temp -----------------------------------------------------
+.claude/cache/
