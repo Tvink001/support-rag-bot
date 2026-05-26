@@ -206,6 +206,29 @@ global limit (sleep between fan-out sends). Distinguish Anthropic 429 (rate) vs
 - Smoke test before Prompt 1: `Context7:resolve-library-id "anthropic claude api"`
   returns a result (not a timeout).
 
+### 4.1 — Build progress & operator-environment realities `[living — updated 2026-05-27]`
+**Build progress:** Prompts 1–4 done — §9 integration rules (Context7-verified);
+§7 schema (`db/schema.sql`, applied to Supabase); §10 ingestion + `/upload` + `/sources`;
+§11/§12 retrieval + grounded Claude answers with citations. The bot answers in-KB
+questions live with source citations. **Remaining:** P5 memory+feedback, P6 escalation,
+P7 voice, P8 admin polish/rate-limit/errors/Sentry, P9 WOW 1 hybrid, P10 WOW 2 auto-learn
+FAQ, P11 golden eval, P12 deploy+README+QA. The per-section `[filled]` markers track this.
+
+**Environment realities (respect these in every prompt):**
+- **TLS:** corporate interception breaks certifi HTTPS (Voyage/Anthropic) intermittently
+  → `truststore.inject_into_ssl()` runs first in `bot/main.py`; any standalone script
+  hitting those APIs must inject it too. asyncpg uses `ssl="require"`.
+- **DB:** `DATABASE_URL` = **session pooler** (`aws-1-eu-north-1.pooler.supabase.com:5432`,
+  user `postgres.<ref>`); the direct `db.<ref>` host is IPv6-only. Local DNS is flaky →
+  that pooler host is **pinned in the Windows hosts file** (`51.21.18.29`). DB password
+  was reset; current `.env` works.
+- **Run locally via the 3.11 venv:** `.\.venv\Scripts\python.exe -m bot.main` (global
+  python is 3.14). No `REDIS_URL` locally → MemoryStorage (fine for polling).
+- **Voyage free tier = 3 RPM** without a payment method → add a card (stays free, 200M
+  tokens) before bulk work (eval). KB loaded: 3 fictional «ТехноХаб» docs in `test-data/kb/`.
+- **P6/P10 prereqs:** add the bot to the managers' group + confirm `MANAGER_CHAT_ID`; bot
+  privacy mode is ON → `/setprivacy → Disable` in BotFather so it reads managers' replies.
+
 ---
 
 ## 5. Development Workflow `[filled]`

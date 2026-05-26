@@ -221,3 +221,57 @@ interception). Fix for curl smoke tests: add `--ssl-no-revoke`. For the Node MCP
 groq/supabase) use OpenSSL+certifi, not Schannel, so they're usually unaffected —
 but if a local run in Prompt 2+ throws SSL errors, the analog fix is
 `SSL_CERT_FILE`/certifi or the `truststore` package. (Same root cause as P3 learnings.)
+
+### 2026-05-26 — Prompt 1: citations × structured output are MUTUALLY EXCLUSIVE (OQ-2) — #anthropic #rag #context7
+Anthropic docs: enabling citations on a document AND `output_config.format` in one
+call → API error. The answer call uses **citations only**; `needs_human` comes from
+the retrieval gate + a system-prompt sentinel, never structured output. (§9.2/§12.)
+
+### 2026-05-27 — Prompt 1/2: pin versions via live pip in the TARGET Python (3.11) — #context7
+Local python is 3.14; resolving pins there risks older versions for C-ext pkgs. Use
+`py -3.11` venv → pip-resolve current stable, validate via `pip install -e .[dev]` +
+gates. 2026-05 currents: aiogram 3.28.2, anthropic 0.104.1, voyageai 0.3.7, supabase
+2.30.0, asyncpg 0.31.0, pgvector 0.4.2, pydantic 2.13.4, pydantic-settings 2.14.1,
+mypy 2.1.0, pytest 9.0.3, pypdf 6.12.2, python-docx 1.2.0, truststore 0.10.4.
+voyageai stubs fight mypy --strict (no_implicit_reexport on `Client`; float|int union
+on `.embeddings`) → `[[tool.mypy.overrides]] module=["voyageai*"] follow_imports="skip"`.
+
+### 2026-05-27 — Supabase connection saga: session pooler + SNI + flaky DNS — #supabase #async #tls #debugging
+(1) Direct host `db.<ref>.supabase.co` is IPv6-ONLY on free tier → use the **session
+pooler** (`aws-1-<region>.pooler.supabase.com:5432`, user `postgres.<ref>`); session
+mode supports asyncpg prepared statements (transaction mode 6543 does not).
+(2) Supavisor routes by **SNI** — connecting to the pooler by raw IP fails auth with a
+MISLEADING "password authentication failed"; always connect by hostname.
+(3) This machine's DNS intermittently fails (WSANO_RECOVERY / errno 11003) for minutes
+→ pinned the pooler host in the Windows hosts file. asyncpg uses `ssl="require"` +
+connect-retry. PostgREST can't run a raw `SELECT 1` → the connectivity probe uses asyncpg.
+
+### 2026-05-27 — asyncpg + pgvector text literal; generated tsvector; HNSW — #pgvector #async
+Insert/query vectors as the text literal `'[...]'::vector` (no numpy/codec). Run
+`SET search_path = public, extensions` on each pooled conn (pool `init=`) so
+unqualified `vector` / `<=>` resolve regardless of pgvector's schema. Generated FTS
+column needs the **2-arg** `to_tsvector('simple', content)` (IMMUTABLE; 'simple' =
+language-agnostic for RU/UK). HNSW (`m=16, ef_construction=128`) = Supabase default.
+
+### 2026-05-27 — Pure chunker = char/4 token estimate, boundary-aware window — #rag
+Don't call a tokenizer API in the chunker (keep it pure/offline/testable). chars/4
+estimate + snap to paragraph/line/sentence/space, guaranteed non-zero overlap, exact
+char offsets. Fine below Voyage's 32k context limit.
+
+### 2026-05-27 — aiogram: register set_my_commands; commands are case-sensitive — #aiogram #debugging
+Without `set_my_commands` there's no "/" autocomplete → users type blind. Commands are
+**case-sensitive**: "/Sources" ≠ "/sources" → `Update is not handled` (silent). Register
+a `BotCommand` menu at startup. Plain text with no matching handler is also "not
+handled" — expected until the chat handler exists.
+
+### 2026-05-27 — Prompt 4: truststore TLS, SDK retry, SKU→hybrid, real cost — #tls #anthropic #cost #rag
+(1) Corporate TLS interception breaks Voyage/Anthropic (certifi) intermittently →
+`import truststore; truststore.inject_into_ssl()` at startup (OS trust store has the
+corporate CA; harmless on Railway/Linux). asyncpg (`ssl="require"`) was already immune.
+(2) The anthropic SDK's built-in `max_retries` does exp backoff + honors `retry-after`
+on 429/529 — no tenacity needed. (3) Vector-only retrieval misses SKUs/article numbers
+(`TH-2003` → cosine 0.416 < 0.6 gate) → WOW 1 hybrid (Prompt 9) fixes it. (4) Real cost
+≈ **$0.0076/answer** (in≈6.5k / out≈220 tok), under the $0.02 cap; system-prompt caching
+did NOT engage (`cache_creation_input_tokens=0` → the ~400-token prompt is below Haiku
+4.5's min cacheable length — confirms the §9.2 gap). (5) Voyage free tier = **3 RPM**
+without a payment method.
