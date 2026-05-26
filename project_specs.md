@@ -120,7 +120,8 @@ source for current stable) and validated by `pip install -e .[dev]` + the full
 gate pipeline — **not** pinned from memory. Runtime: `aiogram==3.28.2`,
 `aiohttp==3.13.5`, `anthropic==0.104.1`, `voyageai==0.3.7`, `supabase==2.30.0`,
 `asyncpg==0.31.0`, `pgvector==0.4.2`, `groq==1.2.0`, `redis==7.4.0`,
-`pydantic==2.13.4`, `pydantic-settings==2.14.1`. Dev: `ruff==0.15.14`,
+`pydantic==2.13.4`, `pydantic-settings==2.14.1`, `pypdf==6.12.2`,
+`python-docx==1.2.0`. Dev: `ruff==0.15.14`,
 `mypy==2.1.0`, `pytest==9.0.3`, `pytest-asyncio==1.4.0`, `pytest-cov==7.1.0`.
 (Prompt 1's aiogram doc snapshot was 3.27.0; current pip stable is 3.28.2 — the
 webhook/FSM API used here is unchanged.) `asyncpg` + `pgvector` were added beyond
@@ -251,7 +252,7 @@ Request lifecycle and ordering invariants are detailed in §10–§14.
 
 ---
 
-## 7. Data Model (Supabase / Postgres / pgvector) `[filled — DDL finalized in Prompt: Schema]`
+## 7. Data Model (Supabase / Postgres / pgvector) `[filled — DDL in db/schema.sql (Prompt 3)]`
 
 DDL lives in `db/schema.sql`. `vector(N)` uses `N = VOYAGE_EMBED_DIM` (frozen
 once the Voyage model is chosen in Prompt 1). Tables:
@@ -308,8 +309,10 @@ in `cooldown_until`.
   → vector + `ts_rank` over `fts`, fused via RRF (WOW 1, §17). RRF may live in
   SQL or Python — decided in §17 with Context7.
 
-RLS posture `[TBD via Prompt: Schema]` (single-tenant v1; service_role
-server-side; enable RLS + policies anyway as good practice).
+RLS posture **[filled — Prompt 3]**: RLS is **enabled on all five tables,
+deny-by-default** (no public policies). The bot connects via the session pooler as
+the `postgres`/owner role (and uses the `service_role` key elsewhere) — both
+**bypass RLS** — so enabling it only locks down the public PostgREST API (§21).
 
 ---
 
@@ -531,7 +534,7 @@ gap recorded).
 
 ---
 
-## 10. RAG Pipeline: Ingestion `[filled — code in Prompt: Ingest]`
+## 10. RAG Pipeline: Ingestion `[filled — code in Prompt 3]`
 
 `/upload` (admin) → bot enters `Admin.awaiting_upload` → receives a PDF/DOCX/TXT
 document → `bot.download` → extract text (PDF and DOCX extraction libs verified
@@ -542,6 +545,18 @@ never split without overlap → compute `sha256` (skip re-ingest if unchanged) �
 `chunks` with `source_id`, `chunk_index`, `fts` auto-generated, `metadata`.
 Update `sources.chunk_count`. One bad chunk/page logs and is skipped; the upload
 reports how many chunks landed. Target: 3 PDFs (≥30 pp) in < 2 min.
+
+**Implementation (Prompt 3):** chunker (`bot/rag/chunker.py`) = pure
+boundary-aware sliding window (snaps to paragraph/line/sentence/space; **never
+zero overlap**); token size is a char-based estimate (chars/4) to stay pure +
+offline. PDFs are extracted **per page** (page → `metadata`); one bad page is
+logged + skipped. `sha256` dedup via a **unique partial index** on active
+sources. Source + chunks are inserted in **one transaction**
+(`Database.ingest_source_with_chunks`); embeddings are written as the pgvector
+text literal `'[...]'::extensions.vector` (no driver-codec coupling). DB access
+uses an **asyncpg pool** (§9.4 transport); `db` + `embeddings` reach handlers via
+aiogram **workflow-data DI**. Admin (§16): `/upload` (FSM `Admin.awaiting_upload`)
+→ document handler → `ingest_document`; `/sources` lists active docs.
 
 ---
 
