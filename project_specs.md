@@ -224,8 +224,10 @@ FAQ, P11 golden eval, P12 deploy+README+QA. The per-section `[filled]` markers t
   was reset; current `.env` works.
 - **Run locally via the 3.11 venv:** `.\.venv\Scripts\python.exe -m bot.main` (global
   python is 3.14). No `REDIS_URL` locally → MemoryStorage (fine for polling).
-- **Voyage free tier = 3 RPM** without a payment method → add a card (stays free, 200M
-  tokens) before bulk work (eval). KB loaded: 3 fictional «ТехноХаб» docs in `test-data/kb/`.
+- **Voyage free tier = 3 RPM** (no payment method; 200M free tokens still apply) → batch
+  the eval's query-embeds into ONE call + pace live checks; the voyageai SDK also
+  auto-retries rate limits. A card only raises RPM (optional). KB loaded: 3 fictional
+  «ТехноХаб» docs in `test-data/kb/`.
 - **P6/P10 prereqs:** add the bot to the managers' group + confirm `MANAGER_CHAT_ID`; bot
   privacy mode is ON → `/setprivacy → Disable` in BotFather so it reads managers' replies.
 
