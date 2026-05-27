@@ -1017,9 +1017,45 @@ Chroma brief). Supabase free tier hosts vectors + state; backup posture per §19
 
 ---
 
-## 26. Build Retrospective `[TBD — final prompt]`
+## 26. Build Retrospective `[filled — Prompt 12, 2026-05-27]`
 
-Fill at the end: biggest gotcha; biggest time-saver; library/API surprises
-(Anthropic citations + structured output, Voyage, pgvector hybrid); final
-golden-run numbers (precision/recall, RAGAS, hallucination %, cost/dialogue,
-p95); deviations from this spec; what to carry to P5/P6.
+**Final golden-run numbers (live, KB = 6 chunks):** faithfulness 1.00, answer-relevancy
+1.00, hallucination 0.00, out-of-scope refusal 1.00, citations 1.00, prompt-injection
+resisted; Recall@10 0.933, MRR 0.878 (hybrid > vector 0.861); cost/dialogue $0.0068, p50
+2.05 s. Three red gates, all artifacts/tuning not defects: Precision@5 0.447 (6-chunk KB +
+single-answer substring labels), cost/100 $0.68 (spec's $0.20/100 is inconsistent with its
+own $0.02/dialogue cap, which passes), p95 7.6 s (n=17 outlier). ~17/30 answerable Qs
+answered, rest escalated (conservative gate on few fat chunks).
+
+**Biggest gotchas.** (1) The Supabase connection saga — the direct DB host is IPv6-only on
+the free tier, Supavisor routes by SNI (so connecting by raw IP gives a *misleading*
+"password failed"), and this machine's DNS is flaky → session pooler + Windows hosts-file
+pin + connect-retry. (2) Corporate TLS interception breaks certifi for Voyage/Anthropic →
+`truststore.inject_into_ssl()`. (3) The secret-redaction regex `\bkey\b` does NOT match
+inside `ANTHROPIC_API_KEY` (underscores are word chars).
+
+**Biggest time-savers.** Context7 before every API claim (caught the citations×structured-
+output exclusivity, the Haiku model id, the Supabase hybrid pattern) · the established
+patterns (`_row_to_chunk`, `_strike_buttons`, pure helpers) made later prompts fast · the
+shared `answer_question` let voice reuse the whole pipeline with zero duplication.
+
+**Library/API surprises.** Anthropic **citations and structured output are mutually
+exclusive** → `needs_human` became a system-prompt sentinel `[[ESCALATE]]`, not JSON.
+System-prompt **caching never engaged** (the ~400-token prompt is below Haiku's min
+cacheable size — `cache_creation_input_tokens=0`). Vector-only retrieval misses exact
+tokens (SKUs, `0-0-12`) → the whole reason for WOW 1. Groq returns a plain string for
+`response_format="text"` (not always a `Transcription`). RAGAS docs were unfetchable via
+Context7 → built a Claude-Haiku judge instead (Anthropic/Voyage-only stack anyway).
+
+**Deviations from spec.** RRF in Python (not SQL `hybrid_search`) — keeps fusion pure +
+testable. Faithfulness/relevancy via a Claude judge, not the RAGAS package. `cited_source_ids`
+stores source **filenames** (callback budget can't carry UUIDs). FAQ ranking relies on the
+saved chunk's natural cosine dominance (priority stored for future biasing, not yet used in
+ranking). The eval was run by applying the committed `keyword_search` fn to the live DB.
+
+**Carry to P5/P6.** Context7-first is non-negotiable and paid for itself. The handler /
+service / pure-helper split + write-after-success idempotency + per-message try/except are
+reusable. A golden-set eval that **surfaces its own red metrics honestly** (rather than
+being tuned to pass) is the real portfolio differentiator. Pre-pin deps in the *target*
+Python. Build the eval earlier next time — it exposed the threshold/chunk-size tuning that
+only a live run reveals.

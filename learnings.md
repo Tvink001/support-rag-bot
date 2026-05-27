@@ -393,3 +393,15 @@ auto-applied):** lower `SIMILARITY_THRESHOLD` ~0.45; smaller `CHUNK_SIZE_TOKENS`
 re-ingest; add a `russian` FTS config alongside 'simple'; ingest more KB; engage prompt caching to
 cut cost (the ~400-tok system prompt is below Haiku's min cacheable size). Hybrid lift confirmed
 (MRR 0.878 > 0.861) but small on a 6-chunk KB — it grows with rare-term volume.
+
+### 2026-05-27 — Prompt 12: portfolio finalization — report reds honestly — #portfolio-polish
+README/architecture.md/supabase-schema.md written with the REAL Prompt-11 numbers, including
+the 3 red gates framed as artifacts/tuning (not hidden). Deploy artifacts verified present +
+correct (Dockerfile layer-caches deps via a stub `bot/__init__.py`; railway.toml healthcheck
+`/health` + explicit restart cap; .gitignore covers `.env`/`.mcp.json`/`secrets`/keys; LICENSE).
+The §19.3/§19.4 production drills (webhook 401-without-header, `/health` 200, FSM restart-survival,
+cold-start `drop_pending_updates`) require the live Railway deploy = operator step; everything
+runnable locally is green (ruff/mypy/65 tests + the live eval). README fixes a stale claim:
+generation uses citations + an `[[ESCALATE]]` sentinel, NOT structured output (they're mutually
+exclusive). Lesson: a portfolio README that shows its red metrics + the fix path reads as more
+credible than one that only lists greens.
