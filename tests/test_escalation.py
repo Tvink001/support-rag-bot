@@ -128,4 +128,5 @@ async def test_manager_suggestion_resolves_and_relays_to_user() -> None:
     state.clear.assert_awaited_once()
     bot.send_message.assert_awaited_once()
     assert bot.send_message.await_args.args[0] == 777  # delivered to the right user
-    message.answer.assert_awaited_once()  # confirmed to the manager
+    assert message.answer.await_count == 2  # confirm to the manager + "save as FAQ?" offer
+    assert message.answer.await_args.kwargs.get("reply_markup") is not None  # WOW 2 offer

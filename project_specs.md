@@ -784,7 +784,7 @@ escalated. Golden-set lift is quantified in Prompt 11.
 
 ---
 
-## 18. WOW 2 — Auto-learn FAQ from Manager `[TBD via Prompt: WOW 2]`
+## 18. WOW 2 — Auto-learn FAQ from Manager `[filled — code in Prompt 10]`
 
 When a manager resolves an escalation (§14 step 5), the bot offers (in the
 managers' chat) **"Сохранить как FAQ?"** (`SaveFaqCB(save|skip)`). On **save**:
@@ -792,6 +792,20 @@ create a `sources` row (`file_type=faq`, high `priority`), chunk the Q→A pair
 (usually one chunk), embed via Voyage, upsert into `chunks` with high `priority`
 so it ranks first on similar future questions. Closes the loop: every human
 answer makes the bot smarter. Idempotent (no duplicate FAQ from a double-click).
+
+**Built (Prompt 10):** After a manager's reply is relayed (§14 Suggest flow),
+`on_manager_suggestion` posts the offer with `SaveFaqCB(action=save|skip,
+escalation_id)`. On **save**, `on_save_faq` reloads the escalation
+(`db.get_escalation`) and calls `ingest_faq` (`bot/rag/ingest.py`): builds
+`content = "Вопрос: …\nОтвет: …"`, chunks it, embeds via Voyage, and stores a
+`sources` row (`file_type="faq"`, `priority=100`) + chunks (`priority=100`),
+reusing `ingest_source_with_chunks`. **Idempotency = two layers:** sha256 of the
+Q→A is dedup-checked (`find_active_source_by_hash`) and the
+`sources_sha256_active_uidx` unique index catches races (`UniqueViolationError` →
+"уже в базе"); the offer buttons are stripped after the first tap. **Ranking:** the
+FAQ chunk is near-identical to the repeated question, so it wins on cosine
+similarity naturally; `priority=100` is stored for future explicit biasing /
+analytics (retrieval order unchanged). No schema migration (reuses existing tables).
 
 ---
 

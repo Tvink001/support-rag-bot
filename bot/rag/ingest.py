@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from uuid import UUID
 
+from asyncpg.exceptions import UniqueViolationError
 from docx import Document
 from pypdf import PdfReader
 
@@ -25,6 +26,7 @@ from bot.services.supabase_client import Database
 logger = logging.getLogger(__name__)
 
 SUPPORTED_TYPES = ("pdf", "docx", "txt")
+FAQ_PRIORITY = 100  # auto-learned FAQ chunks rank above generic ones (§7, §18)
 
 
 @dataclass
@@ -123,4 +125,68 @@ async def ingest_document(
         chunks=chunks,
     )
     logger.info("Ingested '%s': %d chunks", filename, len(chunks))
+    return IngestResult(filename, len(chunks), time.perf_counter() - started, source_id=source_id)
+
+
+async def ingest_faq(
+    *,
+    db: Database,
+    embeddings: EmbeddingService,
+    question: str,
+    answer: str,
+    created_by: int,
+    chunk_size_tokens: int,
+    overlap_tokens: int,
+) -> IngestResult:
+    """Auto-learn a manager's resolution as a high-priority FAQ (WOW 2, §18).
+
+    Idempotent: the Q→A content is sha256-dedup'd against active sources, and the
+    insert is also guarded by the unique index (so a double-tap or a race never
+    creates a duplicate FAQ).
+    """
+    started = time.perf_counter()
+    content = f"Вопрос: {question}\nОтвет: {answer}"
+    sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    existing = await db.find_active_source_by_hash(sha256)
+    if existing is not None:
+        logger.info("FAQ already saved (sha match); skipping")
+        return IngestResult(
+            existing.filename,
+            existing.chunk_count,
+            time.perf_counter() - started,
+            skipped=True,
+            source_id=existing.id,
+        )
+
+    text_chunks = chunk_text(
+        content, chunk_size_tokens=chunk_size_tokens, overlap_tokens=overlap_tokens
+    )
+    vectors = await embeddings.embed_documents([tc.text for tc in text_chunks])
+    chunks = [
+        Chunk(
+            chunk_index=i,
+            content=tc.text,
+            embedding=vector,
+            token_count=tc.token_estimate,
+            metadata={"type": "faq", "char_start": tc.char_start, "char_end": tc.char_end},
+            priority=FAQ_PRIORITY,
+        )
+        for i, (tc, vector) in enumerate(zip(text_chunks, vectors, strict=True))
+    ]
+    filename = f"FAQ: {question.strip()[:60]}"
+    try:
+        source_id = await db.ingest_source_with_chunks(
+            filename=filename,
+            file_type="faq",
+            uploaded_by=created_by,
+            sha256=sha256,
+            priority=FAQ_PRIORITY,
+            chunks=chunks,
+        )
+    except UniqueViolationError:
+        logger.info("FAQ insert hit the dedup unique index (race); treating as saved")
+        return IngestResult(filename, 0, time.perf_counter() - started, skipped=True)
+
+    logger.info("Auto-learned FAQ '%s': %d chunks", filename, len(chunks))
     return IngestResult(filename, len(chunks), time.perf_counter() - started, source_id=source_id)

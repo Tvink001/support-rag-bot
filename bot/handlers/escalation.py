@@ -29,6 +29,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.text_decorations import html_decoration as html
 
 from bot.config import get_settings
+from bot.rag.ingest import ingest_faq
+from bot.services.embeddings import EmbeddingService
 from bot.services.supabase_client import Database
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,13 @@ ESCALATED_TO_USER = "Не нашёл ответ в базе знаний — п�
 
 class EscalateCB(CallbackData, prefix="esc"):
     """``esc:<action>:<escalations.id>`` — action is take | suggest."""
+
+    action: str
+    escalation_id: str
+
+
+class SaveFaqCB(CallbackData, prefix="faq"):
+    """``faq:<action>:<escalations.id>`` — action is save | skip (WOW 2, §18)."""
 
     action: str
     escalation_id: str
@@ -89,6 +98,19 @@ def build_escalation_keyboard(escalation_id: UUID) -> InlineKeyboardMarkup:
     builder.button(text="✅ Взять", callback_data=EscalateCB(action="take", escalation_id=ref))
     builder.button(
         text="✍️ Предложить ответ", callback_data=EscalateCB(action="suggest", escalation_id=ref)
+    )
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def _save_faq_keyboard(escalation_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="💾 Сохранить как FAQ",
+        callback_data=SaveFaqCB(action="save", escalation_id=escalation_id),
+    )
+    builder.button(
+        text="Пропустить", callback_data=SaveFaqCB(action="skip", escalation_id=escalation_id)
     )
     builder.adjust(2)
     return builder.as_markup()
@@ -187,4 +209,46 @@ async def on_manager_suggestion(
         return
 
     await message.answer("✅ Ответ отправлен пользователю.")
-    # Prompt 10 (WOW 2) adds the "Сохранить как FAQ?" offer here.
+    # WOW 2 (§18): offer to auto-learn this resolution into the knowledge base.
+    await message.answer(
+        "💡 Сохранить этот ответ как FAQ в базу знаний?",
+        reply_markup=_save_faq_keyboard(str(escalation.id)),
+    )
+
+
+@escalation_router.callback_query(SaveFaqCB.filter(F.action == "save"))
+async def on_save_faq(
+    query: CallbackQuery, callback_data: SaveFaqCB, db: Database, embeddings: EmbeddingService
+) -> None:
+    escalation = await db.get_escalation(UUID(callback_data.escalation_id))
+    if escalation is None or not escalation.resolution_text:
+        await query.answer("Нет данных для сохранения.")
+        return
+    settings = get_settings()
+    try:
+        result = await ingest_faq(
+            db=db,
+            embeddings=embeddings,
+            question=escalation.question,
+            answer=escalation.resolution_text,
+            created_by=query.from_user.id,
+            chunk_size_tokens=settings.CHUNK_SIZE_TOKENS,
+            overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
+        )
+    except Exception:
+        logger.exception("Failed to save FAQ from escalation %s", escalation.id)
+        await query.answer("Не удалось сохранить.")
+        return
+
+    if result.skipped:
+        await query.answer("Уже в базе знаний.")
+        await _strike_buttons(query.message, "ℹ️ Этот ответ уже был в базе знаний.")
+    else:
+        await query.answer("Добавлено ✅")
+        await _strike_buttons(query.message, "✅ Добавлено в базу знаний.")
+
+
+@escalation_router.callback_query(SaveFaqCB.filter(F.action == "skip"))
+async def on_skip_faq(query: CallbackQuery) -> None:
+    await query.answer("Ок, не сохраняю.")
+    await _strike_buttons(query.message, "Не сохранено в базу.")

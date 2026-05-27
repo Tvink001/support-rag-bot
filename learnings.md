@@ -356,3 +356,15 @@ gate must become "vector weak AND no keyword hit", else WOW 1's wins get escalat
 `best_similarity` = max cosine for display/logging; add a `keyword_hit` bool for the gate.
 The 'simple' tsconfig (RU/UK-safe) must match between the generated `fts` column and the query
 `websearch_to_tsquery('simple', …)`. Operator must run the new `keyword_search` fn in Supabase.
+
+### 2026-05-27 — Prompt 10: auto-learn FAQ — dedup gives idempotency for free; high similarity gives ranking for free — #rag #idempotency
+WOW 2. A manager's resolution → `ingest_faq` stores `content="Вопрос: …\nОтвет: …"` as a
+`file_type="faq"`, `priority=100` source+chunk, reusing `ingest_source_with_chunks`. Two
+things fall out for free: (1) **Idempotency** — the existing sha256 dedup
+(`find_active_source_by_hash`) + the `sources_sha256_active_uidx` unique index (catch
+`asyncpg.UniqueViolationError`) mean a double-tap "Save as FAQ" never duplicates; no new
+"already_saved" column needed. Plus strip the buttons after the first tap. (2) **Ranking** —
+the saved FAQ chunk is near-identical to the repeated question, so it naturally tops cosine
+similarity; `priority=100` is stored for future biasing but retrieval order needn't change to
+make "ask the same question again → answered from the new FAQ" work. The callback only carries
+`escalation_id`; reload the question+resolution from the row at save time (survives restarts).

@@ -330,6 +330,13 @@ class Database:
         )
         return Escalation.model_validate(dict(row)) if row is not None else None
 
+    async def get_escalation(self, escalation_id: UUID) -> Escalation | None:
+        row = await self.pool.fetchrow(
+            f"select {_ESCALATION_COLS} from public.escalations where id = $1",
+            escalation_id,
+        )
+        return Escalation.model_validate(dict(row)) if row is not None else None
+
     async def create_escalation(self, user_id: int, question: str) -> UUID:
         """Open a new escalation; return its id."""
         escalation_id: UUID = await self.pool.fetchval(
