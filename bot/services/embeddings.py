@@ -47,3 +47,16 @@ class EmbeddingService:
         """Embed a single query string (``input_type='query'``)."""
         result = await asyncio.to_thread(self._embed_sync, [text], "query")
         return result[0]
+
+    async def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        """Embed several queries in batches (``input_type='query'``).
+
+        Used by the golden-set eval to embed all queries in as few calls as
+        possible (Voyage free tier is 3 RPM — batching avoids the limit).
+        """
+        out: list[list[float]] = []
+        for i in range(0, len(texts), _BATCH_SIZE):
+            out.extend(
+                await asyncio.to_thread(self._embed_sync, texts[i : i + _BATCH_SIZE], "query")
+            )
+        return out

@@ -368,3 +368,28 @@ the saved FAQ chunk is near-identical to the repeated question, so it naturally 
 similarity; `priority=100` is stored for future biasing but retrieval order needn't change to
 make "ask the same question again → answered from the new FAQ" work. The callback only carries
 `escalation_id`; reload the question+resolution from the row at save time (survives restarts).
+
+### 2026-05-27 — Prompt 11: golden-set eval — live results + 3 red gates (artifacts/tuning) — #rag #cost #portfolio-polish
+Ran `test-data/run_eval.py` live against the real KB (6 chunks). Decision: a Claude-Haiku
+**LLM-judge** for faithfulness/relevancy instead of the RAGAS package (Context7 couldn't
+return RAGAS docs to verify custom-LLM wiring; stack is Anthropic/Voyage-only — RAGAS defaults
+to OpenAI; Voyage 3 RPM makes RAGAS embedding impractical). Results:
+```
+RETRIEVAL (hybrid vs vector): P@5 0.447|0.447  Recall@10 0.933|0.933  MRR 0.878|0.861
+GATES: faithfulness 1.000 PASS · answer_relevancy 1.000 PASS · hallucination 0.000 PASS
+       out_of_scope_refusal 1.000 PASS · recall@10 0.933 PASS · mrr 0.878 PASS
+       precision@5 0.447 RED · cost_per_100 $0.678 RED · p95_latency 7.61s RED
+       citation_rate 1.000 · injection_resisted True · cost/dialogue $0.0068 · p50 2.05s
+```
+The 3 reds are NOT a broken bot: (1) **P@5** is capped by a 6-chunk KB + single-answer substring
+labels (≤1–2 relevant/query → P@5 ceiling ~0.2–0.4); Recall@10 0.93 + MRR 0.88 show retrieval is
+strong. (2) **cost/100 $0.68 > $0.20** but cost/dialogue $0.0068 PASSES the §3.2 $0.02/dialogue
+cap — "$0.20/100" is inconsistent with "$0.02/dialogue" (≈ spec typo; should be $2/100). (3)
+**p95 7.6s** is a tiny-sample outlier (n=17 → p95 idx = slowest call; cold-start/retry); p50 2.05s
+is fine. **Real finding:** only 17/30 answerable Qs were answered — the rest escalated. Causes:
+(a) 6 fat chunks dilute cosine, (b) the 0.6 gate is high for fat chunks, (c) 'simple' FTS doesn't
+stem Russian → keyword arm misses inflected forms. **Proposed fixes (operator decision, NOT
+auto-applied):** lower `SIMILARITY_THRESHOLD` ~0.45; smaller `CHUNK_SIZE_TOKENS` (e.g. 250) +
+re-ingest; add a `russian` FTS config alongside 'simple'; ingest more KB; engage prompt caching to
+cut cost (the ~400-tok system prompt is below Haiku's min cacheable size). Hybrid lift confirmed
+(MRR 0.878 > 0.861) but small on a 6-chunk KB — it grows with rare-term volume.

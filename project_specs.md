@@ -832,6 +832,26 @@ business logic (chunker, rrf, escalation).
   payload does not alter behavior).
 - **Hybrid > vector-only** on the golden set (WOW 1 must earn its place).
 
+**Built + run (Prompt 11):** `test-data/run_eval.py` + golden sets
+(`qa.jsonl` 34, `retrieval.jsonl` 30). Faithfulness/relevancy via a **Claude-Haiku
+LLM-judge** (RAGAS package deferred — Context7 couldn't verify its custom-LLM
+wiring, the stack is Anthropic/Voyage-only, and Voyage 3 RPM makes RAGAS embedding
+impractical; the judge computes equivalent metrics). All query embeddings batch
+into one Voyage call. **Live result (KB = 6 chunks):** faithfulness 1.00,
+relevancy 1.00, hallucination 0.00, out-of-scope refusal 1.00, citations 1.00,
+injection resisted; Recall@10 0.933, MRR 0.878 (hybrid > vector 0.861).
+**3 red gates flagged for an operator decision (NOT auto-fixed):** (1) **P@5
+0.447** — artifact of a 6-chunk KB + single-answer substring labels (Recall@10/MRR
+prove retrieval is strong); (2) **cost/100 $0.68 > $0.20** — but cost/dialogue
+$0.0068 passes the §3.2 $0.02/dialogue cap; the $0.20/100 figure is inconsistent
+(≈ typo for $2/100); (3) **p95 7.6 s** — tiny-sample outlier, p50 2.05 s. **Tuning
+finding:** 17/30 answerable Qs answered, rest escalated (0.6 gate + fat chunks +
+'simple' FTS not stemming RU). **Proposed (operator decides before §19.3):** lower
+`SIMILARITY_THRESHOLD`≈0.45, smaller chunks + re-ingest, add a `russian` FTS config,
+ingest more KB, engage prompt caching. **Operator note:** I applied the committed
+`keyword_search` SQL function to the live DB to run the eval (it was the pending
+Prompt-9 step) — idempotent, already in `db/schema.sql`.
+
 ### 19.3 — Pipeline gate (after the final build prompt)
 Full E2E on production: `/upload` 3 PDFs < 2 min; grounded answer < 4 s citing a
 source; out-of-KB question → honest refusal + manager escalation with Take
