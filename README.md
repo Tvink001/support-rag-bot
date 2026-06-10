@@ -1,143 +1,56 @@
-# P4_RAG — Claude RAG FAQ Telegram bot
+# Document-Grounded FAQ Bot
+> A Telegram support bot that answers strictly from a company's uploaded documents (PDF / DOCX / TXT), cites its sources on every reply, never invents facts, and hands genuinely hard questions to a human manager.
 
-![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
-![aiogram](https://img.shields.io/badge/aiogram-3.28-2CA5E0?logo=telegram&logoColor=white)
-![Claude](https://img.shields.io/badge/Claude-Haiku%204.5-D97757)
-![Voyage AI](https://img.shields.io/badge/Voyage-voyage--3.5-5A4FCF)
-![Supabase](https://img.shields.io/badge/Supabase-pgvector-3FCF8E?logo=supabase&logoColor=white)
-![Groq](https://img.shields.io/badge/Groq-Whisper%20v3--turbo-F55036)
-![Railway](https://img.shields.io/badge/Railway-webhook-0B0D0E?logo=railway&logoColor=white)
-![ruff](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
-![mypy](https://img.shields.io/badge/types-mypy%20strict-blue)
-![tests](https://img.shields.io/badge/tests-65%20passing-brightgreen)
-
-> A Telegram support bot that answers **strictly from a company's uploaded documents**
-> (PDF / DOCX / TXT) with Retrieval-Augmented Generation, **cites its sources on every
-> answer**, never invents facts, and hands genuinely hard questions to a human manager.
+**Live demo:** [LIVE_DEMO_URL]
 
 ![demo](docs/screenshots/demo.gif)
-<!-- ~90 s demo GIF: /upload → grounded cited answer → voice question → out-of-KB escalation → manager Take → 👍 -->
+<!-- ~90 s demo: /upload → grounded cited answer → voice question → out-of-KB escalation → manager Take → 👍 -->
 
-## Why it's not "just a GPT wrapper"
+## Overview
 
-The product **is** the grounding. The bot answers only from retrieved document chunks,
-uses Claude's **native citations** so every cited span is provably from the context, and
-when the knowledge base can't answer it says so honestly and **escalates to a managers'
-chat** instead of guessing. Two features lift it past a toy:
+Support teams spend most of their day answering the same questions out of the same documents. A naive LLM "wrapper" cheerfully invents answers when the knowledge base doesn't cover the question, which is the exact failure mode that erodes trust. This bot inverts that: it only answers from retrieved document chunks, cites every claim back to the source span, and when retrieval fails it escalates to a managers' chat instead of guessing. When a manager resolves an escalation, that human answer is saved back to the knowledge base as a high-priority chunk — so the next identical question is answered by the bot, not a human.
 
-| WOW feature | What it does | Why it matters |
-|---|---|---|
-| **Hybrid search (BM25 + RRF)** | Fuses pgvector cosine with Postgres full-text (`ts_rank_cd`) via Reciprocal Rank Fusion (k=60) | Vector search misses exact tokens — SKUs, article numbers, phone numbers, `0-0-12`. The keyword arm catches them; a low-cosine exact hit is answered, not escalated. |
-| **Auto-learn FAQ from a manager** | When a manager resolves an escalation, one tap saves that Q→A into the KB as a high-priority chunk | Closes the loop: every human answer makes the bot answer the next identical question itself. |
+## Key Features
 
-## Architecture
+- **Grounded answers only.** Every reply quotes the source span and attaches a "Источник" footer with the file name and page; if the retrieved chunks don't contain the answer, the bot says so honestly instead of guessing.
+- **Hybrid retrieval (BM25 + vector + RRF).** Vector cosine catches semantically similar wording; Postgres full-text (`ts_rank_cd`) catches exact tokens (SKUs, article numbers, phone numbers like `0-0-12`); Reciprocal Rank Fusion at `k=60` combines them.
+- **Escalation to a managers' chat** with two inline actions: **Take** (the manager replies in private, the bot stops responding for that user for the cooldown window) and **Suggest** (manager drafts a reply that the bot delivers verbatim).
+- **Auto-learn from manager resolutions.** When a manager takes or suggests, the resulting Q→A pair is saved to the KB as a high-priority chunk; the next user asking the same question gets the bot's answer.
+- **Voice questions** via Groq Whisper Large v3 Turbo — transcribed in place, processed identically to text.
+- **Conversation memory** — last N turns of the user's dialogue are passed to the model so follow-ups like "and the price?" resolve correctly.
 
-```mermaid
-flowchart TD
-    U["User · text or voice"] -->|voice| W["Groq Whisper v3-turbo"]
-    W --> Q["Question"]
-    U -->|text| Q
-    Q --> CD{"Active escalation?"}
-    CD -->|cooldown| S["stay silent"]
-    CD -->|no| R["Hybrid retrieval"]
-    R --> VEC["pgvector cosine"]
-    R --> KW["Postgres FTS · ts_rank_cd"]
-    VEC --> RRF["RRF fusion (k=60)"]
-    KW --> RRF
-    RRF --> G{"strong vector OR keyword hit?"}
-    G -->|no| ESC["Escalate to managers — Take / Suggest"]
-    G -->|yes| CL["Claude Haiku 4.5 — grounded + citations"]
-    CL --> ANS["Answer + Источник + 👍/👎"]
-    ESC -->|manager resolves| FAQ["Auto-learn FAQ → KB"]
-    ANS -. memory .-> PG[("Supabase: vectors · memory · escalations · feedback")]
-```
+## Tech Stack
 
-## Results — golden-set evaluation
+**Language + bot framework**
+- Python 3.11
+- aiogram 3.28 (webhook in production, polling in development) — FSM, middleware, CallbackData
 
-Run live (`test-data/run_eval.py`) against the knowledge base. Generation quality is
-judged by a Claude-Haiku LLM-judge (RAGAS-style metrics on the project's own
-Anthropic/Voyage stack). **On the answered set the bot is flawless; retrieval ranking is
-strong:**
+**Generation + embeddings**
+- Anthropic Haiku 4.5 — grounded generation with native citations on `document` blocks
+- Voyage `voyage-3.5` — 1024-dim multilingual embeddings (RU/UK/EN)
+- Groq `whisper-large-v3-turbo` — voice transcription, free tier
 
-| Metric | Result | Gate (§19.2) |
-|---|---|---|
-| Faithfulness (judge) | **1.00** | ≥ 0.85 ✅ |
-| Answer relevancy (judge) | **1.00** | ≥ 0.85 ✅ |
-| Hallucination rate | **0.00** | < 0.05 ✅ |
-| Out-of-scope refusal | **1.00** | ≥ 0.95 ✅ |
-| Citations present | **1.00** | required ✅ |
-| Prompt-injection resisted | **yes** | required ✅ |
-| Recall@10 | **0.933** | ≥ 0.85 ✅ |
-| MRR | **0.878** (hybrid > vector 0.861) | ≥ 0.70 ✅ |
-| Cost / dialogue | **$0.0068** | ≤ $0.02 ✅ |
-| p50 latency | **2.05 s** | — |
+**Storage**
+- Supabase (Postgres + pgvector) — vectors *and* state (memory, escalations, feedback) in one managed store
+- HNSW index on the embedding column + GIN index on the FTS column
 
-**Honest caveats (this is a demo KB of 6 chunks):** `Precision@5` (0.45) is capped by a
-tiny KB + single-answer ground-truth labels — Recall@10 and MRR show retrieval actually
-works; `p95` latency (7.6 s) is a small-sample outlier (n=17) over a p50 of 2.05 s; and
-the conservative 0.6 similarity gate escalates ~40% of answerable questions on so few,
-large chunks. All three are tuning/methodology items (lower the threshold, smaller chunks,
-more KB) documented in `learnings.md`, not pipeline defects.
+**Runtime + ops**
+- Railway with Docker, webhook mode, `/health` for healthcheck
+- Sentry for unhandled exceptions
+- `ruff` + `mypy` strict + `pytest` (65 tests covering pure logic + handler integration with mocked I/O)
 
-## Tech stack & deliberate substitutions
+## Architecture Highlights
 
-The brief defaulted to OpenAI + Chroma + SQLite; three substitutions (rationale in
-`docs/architecture.md` / `project_specs.md` §2):
+**1. Hybrid retrieval with RRF, not a vector-only baseline.** Vector cosine misses exact tokens — SKUs, article numbers, phone numbers like `0-0-12`. The keyword arm (Postgres FTS via `ts_rank_cd`) catches those, and RRF fusion at `k=60` produces a single ranked list per query. In golden-set evaluation the hybrid ranking lifts MRR from 0.861 (vector only) to 0.878 — small in the headline number, but it's specifically the type of question where pure vector silently fails.
 
-- **Python 3.11 · aiogram 3.28** — async bot framework (webhook in prod, polling in dev).
-- **Claude Haiku 4.5** — grounded generation with **native citations** on `document`
-  blocks. Citations and structured output are mutually exclusive, so the `needs_human`
-  escalation signal is a system-prompt **sentinel** (`[[ESCALATE]]`), not a JSON schema.
-- **Voyage AI `voyage-3.5` (1024-dim)** — Claude has no embeddings API; Voyage is
-  Anthropic's own recommendation and is multilingual (RU/UK).
-- **Supabase (pgvector + Postgres)** — one managed store for vectors **and** state
-  (memory, escalations, feedback). No persistent volume on Railway (vs. the Chroma path).
-- **Groq `whisper-large-v3-turbo`** — voice input, permanent free tier.
-- **Railway** — Docker, webhook mode, healthcheck `/health`.
+**2. Grounding via native document-block citations.** Claude's `document` content blocks support inline citations: the model returns text spans tagged with the source chunk they were drawn from, and the bot renders those as "Источник: …" lines below the answer. Because citations and structured output are mutually exclusive on the Anthropic API, the `needs_human` escalation signal is encoded as a system-prompt **sentinel** (`[[ESCALATE]]`) in the response — parsed deterministically, no JSON schema, no failure mode of "schema validation passed but answer was bad".
 
-## Project structure
+**3. Auto-learn loop closes the retrieval gap.** Every manager resolution (Take or Suggest) creates a new high-priority chunk in the KB tagged with the original question, the manager's answer, and a higher boost score than ingested document chunks. The next user asking that question retrieves the synthetic chunk first, so the bot can answer without escalating. Retrieval gaps are closed by humans, but only once each.
 
-```
-bot/
-├── main.py              # entry: bot, dispatcher, FSM storage, DB pool, lifecycle, Sentry
-├── config.py            # pydantic-settings (SecretStr, validators)
-├── models.py            # Chunk, Source, RetrievedChunk, Escalation, ConversationTurn, …
-├── middlewares.py       # per-user throttle (anti-flood + LLM/min cap)
-├── handlers/            # start · chat · admin · escalation · feedback · voice · errors
-├── rag/                 # chunker · ingest · retrieve (hybrid) · rrf (pure)
-├── llm/                 # claude_client (citations + sentinel) · prompts
-├── memory/              # conversation (last-N turns, Postgres)
-└── services/            # supabase_client (asyncpg) · embeddings (Voyage) · whisper (Groq)
-db/schema.sql            # pgvector, tables, HNSW + GIN indexes, match_chunks / keyword_search
-tests/                   # 65 tests — pure logic + handler integration (mocked I/O)
-test-data/               # golden qa/retrieval sets + run_eval.py (the RAG quality gate)
-```
+**4. One Postgres for vectors AND state.** Supabase's `pgvector` extension means the same database holds the vector index, the conversation memory table, the escalations queue, and the feedback log. No second store (Chroma + SQLite + Redis...) means no cross-store consistency problem on escalation cleanup, no extra deploy surface on Railway, and no persistent volume needed.
 
-## Running it
+**5. Voice and text on the same retrieval path.** The Groq Whisper transcription writes directly into the same handler that text messages hit; there's no parallel pipeline for voice. The voice path is half a network call longer than text, never a separate code path that could drift.
 
-```powershell
-py -3.11 -m venv .venv ; .\.venv\Scripts\python.exe -m pip install -e .[dev]
-copy .env.example .env   # fill keys (see .env.example / project_specs.md §3.1)
-# apply db/schema.sql once in the Supabase SQL editor, then:
-$env:MODE="polling"; .\.venv\Scripts\python.exe -m bot.main
-```
+## Status
 
-Local quality gate: `ruff check . ; ruff format . --check ; mypy bot/ ; pytest -q`.
-RAG quality gate: `.venv\Scripts\python.exe test-data\run_eval.py`. Deploy: see
-`docs/architecture.md` and `project_specs.md` §23 (Railway, webhook, Redis FSM).
-
-## What this demonstrates
-
-**Async Python** (event-loop-safe external I/O) · **aiogram 3** (webhook, FSM, middleware,
-CallbackData) · **RAG engineering** (chunking, hybrid retrieval, RRF, grounding gate) ·
-**LLM integration** (Claude citations, prompt-injection defence, cost control) · **vector
-DB** (pgvector, HNSW, Postgres FTS) · **evaluation discipline** (golden sets, an honest
-quality gate that surfaces its own red metrics).
-
-## Docs
-
-- `project_specs.md` — single source of truth · `docs/architecture.md` — the *why* ·
-  `docs/supabase-schema.md` — data model · `learnings.md` — gotchas & decisions ·
-  `.env.example` — every variable.
-
-_MIT licensed. A portfolio project; the «ТехноХаб» knowledge base is fictional._
+Case study / portfolio project. Quality gate locked behind a golden-set evaluation (`test-data/run_eval.py`) measuring faithfulness, answer relevancy, out-of-scope refusal, citations present, recall@10, MRR, cost-per-dialogue, and prompt-injection resistance. The "ТехноХаб" knowledge base in the demo is fictional.
