@@ -1,8 +1,6 @@
 # Document-Grounded FAQ Bot
 > A Telegram support bot that answers strictly from a company's uploaded documents (PDF / DOCX / TXT), cites its sources on every reply, never invents facts, and hands genuinely hard questions to a human manager.
 
-**Live demo:** [LIVE_DEMO_URL]
-
 ![demo](docs/screenshots/demo.gif)
 <!-- ~90 s demo: /upload → grounded cited answer → voice question → out-of-KB escalation → manager Take → 👍 -->
 
