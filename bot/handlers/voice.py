@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 voice_router = Router(name="voice")
 
 MAX_VOICE_BYTES = 1024 * 1024  # ~1 MB cap at the handler (§9.1)
-_TOO_LARGE = "Голосовое слишком длинное. Задайте вопрос покороче или напишите текстом 🙏"
-_TRANSCRIBE_FAILED = "Не удалось распознать голос. Напишите, пожалуйста, текстом 🙏"
+_TOO_LARGE = "Voice message too long. Ask a shorter question or type it out 🙏"
+_TRANSCRIBE_FAILED = "Couldn't recognize the voice. Please type your question 🙏"
 
 
 @voice_router.message(F.voice & (F.chat.type == "private"))

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 escalation_router = Router(name="escalation")
 
-ESCALATED_TO_USER = "Не нашёл ответ в базе знаний — передаю ваш вопрос менеджеру. Ответят скоро 🙏"
+ESCALATED_TO_USER = "Couldn't find an answer in the knowledge base — passing your question to a manager. They'll reply soon 🙏"
 
 
 class EscalateCB(CallbackData, prefix="esc"):
@@ -83,10 +83,10 @@ def compute_cooldown_until(now: datetime, hours: int) -> datetime:
 
 
 def _manager_post(user: User, question: str) -> str:
-    name = html.quote(user.full_name) if user.full_name else "пользователь"
+    name = html.quote(user.full_name) if user.full_name else "user"
     handle = f" (@{user.username})" if user.username else ""
     return (
-        "🆘 <b>Новый вопрос — нужна помощь менеджера</b>\n\n"
+        "🆘 <b>New question — manager help needed</b>\n\n"
         f"👤 {name}{handle} · id <code>{user.id}</code>\n\n"
         f"❓ {html.quote(question)}"
     )
@@ -95,9 +95,9 @@ def _manager_post(user: User, question: str) -> str:
 def build_escalation_keyboard(escalation_id: UUID) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     ref = str(escalation_id)
-    builder.button(text="✅ Взять", callback_data=EscalateCB(action="take", escalation_id=ref))
+    builder.button(text="✅ Take", callback_data=EscalateCB(action="take", escalation_id=ref))
     builder.button(
-        text="✍️ Предложить ответ", callback_data=EscalateCB(action="suggest", escalation_id=ref)
+        text="✍️ Suggest an answer", callback_data=EscalateCB(action="suggest", escalation_id=ref)
     )
     builder.adjust(2)
     return builder.as_markup()
@@ -106,11 +106,11 @@ def build_escalation_keyboard(escalation_id: UUID) -> InlineKeyboardMarkup:
 def _save_faq_keyboard(escalation_id: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="💾 Сохранить как FAQ",
+        text="💾 Save as FAQ",
         callback_data=SaveFaqCB(action="save", escalation_id=escalation_id),
     )
     builder.button(
-        text="Пропустить", callback_data=SaveFaqCB(action="skip", escalation_id=escalation_id)
+        text="Skip", callback_data=SaveFaqCB(action="skip", escalation_id=escalation_id)
     )
     builder.adjust(2)
     return builder.as_markup()
@@ -167,10 +167,10 @@ async def on_take(query: CallbackQuery, callback_data: EscalateCB, db: Database)
     )
     took = await db.take_escalation(UUID(callback_data.escalation_id), manager.id, cooldown_until)
     if not took:
-        await query.answer("Уже в работе.")
+        await query.answer("Already being handled.")
         return
-    await query.answer("Взято в работу ✅")
-    await _strike_buttons(query.message, f"✅ В работе у {html.quote(manager.full_name)}")
+    await query.answer("Taken ✅")
+    await _strike_buttons(query.message, f"✅ Handled by {html.quote(manager.full_name)}")
 
 
 @escalation_router.callback_query(EscalateCB.filter(F.action == "suggest"))
@@ -180,7 +180,7 @@ async def on_suggest(query: CallbackQuery, callback_data: EscalateCB, state: FSM
     await query.answer()
     reply = getattr(query.message, "answer", None)
     if reply is not None:
-        await reply("✍️ Напишите ответ одним сообщением — я передам его пользователю.")
+        await reply("✍️ Write the answer in one message — I'll pass it to the user.")
 
 
 @escalation_router.message(ManagerFlow.awaiting_suggestion, F.text)
@@ -195,23 +195,23 @@ async def on_manager_suggestion(
 
     escalation = await db.resolve_escalation(UUID(str(raw_id)), message.text)
     if escalation is None:
-        await message.answer("Не нашёл это обращение (возможно, уже закрыто).")
+        await message.answer("Couldn't find this request (it may already be closed).")
         return
 
     try:
         await bot.send_message(
             escalation.user_id,
-            f"💬 <b>Ответ от менеджера:</b>\n\n{html.quote(message.text)}",
+            f"💬 <b>Reply from the manager:</b>\n\n{html.quote(message.text)}",
         )
     except Exception:
         logger.exception("Failed to deliver manager reply to user %s", escalation.user_id)
-        await message.answer("⚠️ Не удалось доставить ответ пользователю.")
+        await message.answer("⚠️ Couldn't deliver the reply to the user.")
         return
 
-    await message.answer("✅ Ответ отправлен пользователю.")
+    await message.answer("✅ Reply sent to the user.")
     # WOW 2 (§18): offer to auto-learn this resolution into the knowledge base.
     await message.answer(
-        "💡 Сохранить этот ответ как FAQ в базу знаний?",
+        "💡 Save this answer as a FAQ in the knowledge base?",
         reply_markup=_save_faq_keyboard(str(escalation.id)),
     )
 
@@ -222,7 +222,7 @@ async def on_save_faq(
 ) -> None:
     escalation = await db.get_escalation(UUID(callback_data.escalation_id))
     if escalation is None or not escalation.resolution_text:
-        await query.answer("Нет данных для сохранения.")
+        await query.answer("Nothing to save.")
         return
     settings = get_settings()
     try:
@@ -237,18 +237,18 @@ async def on_save_faq(
         )
     except Exception:
         logger.exception("Failed to save FAQ from escalation %s", escalation.id)
-        await query.answer("Не удалось сохранить.")
+        await query.answer("Couldn't save.")
         return
 
     if result.skipped:
-        await query.answer("Уже в базе знаний.")
-        await _strike_buttons(query.message, "ℹ️ Этот ответ уже был в базе знаний.")
+        await query.answer("Already in the knowledge base.")
+        await _strike_buttons(query.message, "ℹ️ This answer was already in the knowledge base.")
     else:
-        await query.answer("Добавлено ✅")
-        await _strike_buttons(query.message, "✅ Добавлено в базу знаний.")
+        await query.answer("Added ✅")
+        await _strike_buttons(query.message, "✅ Added to the knowledge base.")
 
 
 @escalation_router.callback_query(SaveFaqCB.filter(F.action == "skip"))
 async def on_skip_faq(query: CallbackQuery) -> None:
-    await query.answer("Ок, не сохраняю.")
-    await _strike_buttons(query.message, "Не сохранено в базу.")
+    await query.answer("OK, not saving.")
+    await _strike_buttons(query.message, "Not saved to the base.")

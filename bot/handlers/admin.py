@@ -55,10 +55,10 @@ class DeleteSourceCB(CallbackData, prefix="del"):
 def _delete_confirm_keyboard(source_id: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🗑 Удалить", callback_data=DeleteSourceCB(action="confirm", source_id=source_id)
+        text="🗑 Delete", callback_data=DeleteSourceCB(action="confirm", source_id=source_id)
     )
     builder.button(
-        text="Отмена", callback_data=DeleteSourceCB(action="cancel", source_id=source_id)
+        text="Cancel", callback_data=DeleteSourceCB(action="cancel", source_id=source_id)
     )
     builder.adjust(2)
     return builder.as_markup()
@@ -68,27 +68,27 @@ def _delete_confirm_keyboard(source_id: str) -> InlineKeyboardMarkup:
 async def cmd_upload(message: Message, state: FSMContext) -> None:
     await state.set_state(Admin.awaiting_upload)
     await message.answer(
-        "📎 Пришлите документ <b>PDF</b>, <b>DOCX</b> или <b>TXT</b> "
-        "(до 20 МБ) одним файлом. Для отмены — /cancel."
+        "📎 Send a <b>PDF</b>, <b>DOCX</b> or <b>TXT</b> document "
+        "(up to 20 MB) as a single file. To cancel — /cancel."
     )
 
 
 @admin_router.message(Command("cancel"), AdminFilter(), Admin.awaiting_upload)
 async def cmd_cancel(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("Отменено.")
+    await message.answer("Cancelled.")
 
 
 @admin_router.message(Command("sources"), AdminFilter())
 async def cmd_sources(message: Message, db: Database) -> None:
     sources = await db.list_active_sources()
     if not sources:
-        await message.answer("База знаний пуста. Загрузите документ через /upload.")
+        await message.answer("The knowledge base is empty. Upload a document via /upload.")
         return
-    lines = ["<b>Активные источники:</b>"]
+    lines = ["<b>Active sources:</b>"]
     for s in sources:
         when = s.uploaded_at.strftime("%Y-%m-%d %H:%M")
-        lines.append(f"• <code>{s.id}</code>\n  {s.filename} — {s.chunk_count} чанков — {when}")
+        lines.append(f"• <code>{s.id}</code>\n  {s.filename} — {s.chunk_count} chunks — {when}")
     await message.answer("\n".join(lines))
 
 
@@ -106,15 +106,15 @@ async def handle_upload(
     file_type = Path(document.file_name or "").suffix.lower().lstrip(".")
     if file_type not in SUPPORTED_TYPES:
         await message.answer(
-            f"Формат «{file_type or '?'}» не поддерживается. Нужен PDF, DOCX или TXT."
+            f"Format «{file_type or '?'}» is not supported. Need PDF, DOCX or TXT."
         )
         return
     if document.file_size is not None and document.file_size > MAX_UPLOAD_BYTES:
-        await message.answer("Файл слишком большой (максимум 20 МБ).")
+        await message.answer("File too large (20 MB max).")
         return
 
     await state.clear()
-    await message.answer("⏳ Обрабатываю документ…")
+    await message.answer("⏳ Processing the document…")
     settings = get_settings()
     try:
         buffer = BytesIO()
@@ -131,19 +131,19 @@ async def handle_upload(
         )
     except Exception:
         logger.exception("Ingestion failed for an uploaded document")
-        await message.answer("⚠️ Не удалось обработать документ. Попробуйте ещё раз позже.")
+        await message.answer("⚠️ Couldn't process the document. Please try again later.")
         return
 
     if result.skipped:
         await message.answer(
-            f"ℹ️ «{result.filename}» уже в базе ({result.chunks_added} чанков). Пропускаю."
+            f"ℹ️ «{result.filename}» is already in the base ({result.chunks_added} chunks). Skipping."
         )
     elif result.chunks_added == 0:
-        await message.answer("⚠️ Не удалось извлечь текст из документа.")
+        await message.answer("⚠️ Couldn't extract text from the document.")
     else:
         await message.answer(
-            f"✅ «{result.filename}»: добавлено <b>{result.chunks_added}</b> чанков "
-            f"за {result.elapsed_seconds:.1f} с."
+            f"✅ «{result.filename}»: added <b>{result.chunks_added}</b> chunks "
+            f"in {result.elapsed_seconds:.1f} s."
         )
 
 
@@ -153,22 +153,22 @@ async def cmd_delete(message: Message, command: CommandObject, db: Database) -> 
     try:
         source_id = UUID(raw)
     except ValueError:
-        await message.answer("Использование: <code>/delete &lt;id&gt;</code> (id из /sources).")
+        await message.answer("Usage: <code>/delete &lt;id&gt;</code> (id from /sources).")
         return
     source = await db.get_source(source_id)
     if source is None or source.status != "active":
-        await message.answer("Источник не найден или уже удалён.")
+        await message.answer("Source not found or already deleted.")
         return
     await message.answer(
-        f"Удалить «{source.filename}» ({source.chunk_count} чанков)? Действие необратимо.",
+        f"Delete «{source.filename}» ({source.chunk_count} chunks)? This can't be undone.",
         reply_markup=_delete_confirm_keyboard(str(source_id)),
     )
 
 
 @admin_router.callback_query(DeleteSourceCB.filter(F.action == "cancel"), AdminFilter())
 async def on_delete_cancel(query: CallbackQuery) -> None:
-    await query.answer("Отменено")
-    await _finish_delete(query, "Удаление отменено.")
+    await query.answer("Cancelled")
+    await _finish_delete(query, "Deletion cancelled.")
 
 
 @admin_router.callback_query(DeleteSourceCB.filter(F.action == "confirm"), AdminFilter())
@@ -177,11 +177,11 @@ async def on_delete_confirm(
 ) -> None:
     removed = await db.soft_delete_source(UUID(callback_data.source_id))
     if removed is None:
-        await query.answer("Уже удалён.")
-        await _finish_delete(query, "Источник уже был удалён.")
+        await query.answer("Already deleted.")
+        await _finish_delete(query, "The source was already deleted.")
         return
-    await query.answer("Удалено ✅")
-    await _finish_delete(query, f"🗑 Источник удалён — {removed} чанков убрано из базы.")
+    await query.answer("Deleted ✅")
+    await _finish_delete(query, f"🗑 Source deleted — {removed} chunks removed from the base.")
 
 
 async def _finish_delete(query: CallbackQuery, text: str) -> None:
@@ -197,4 +197,4 @@ async def _finish_delete(query: CallbackQuery, text: str) -> None:
 
 @admin_router.message(Command("upload", "sources", "delete"))
 async def admin_denied(message: Message) -> None:
-    await message.answer("⛔ Нет прав.")
+    await message.answer("⛔ No permission.")

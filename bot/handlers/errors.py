@@ -84,7 +84,7 @@ def register_error_handler(
             # parse_mode=None: the sanitized detail is plain text, not HTML.
             await bot.send_message(
                 settings.MANAGER_CHAT_ID,
-                f"⚠️ Непредвиденная ошибка бота:\n{detail}",
+                f"⚠️ Unexpected bot error:\n{detail}",
                 parse_mode=None,
             )
         except Exception:

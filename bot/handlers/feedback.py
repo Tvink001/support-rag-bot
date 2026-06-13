@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 feedback_router = Router(name="feedback")
 
 # Shared with the chat handler so the footer is written and parsed identically.
-SOURCE_FOOTER_PREFIX = "Источник: "
+SOURCE_FOOTER_PREFIX = "Source: "
 
 
 class FeedbackCB(CallbackData, prefix="fb"):
@@ -49,7 +49,7 @@ def build_feedback_keyboard(assistant_msg_id: int) -> InlineKeyboardMarkup:
 
 
 def _parse_cited_sources(text: str | None) -> list[str]:
-    """Pull the cited source filenames out of an answer's "Источник: a, b" footer."""
+    """Pull the cited source filenames out of an answer's "Source: a, b" footer."""
     if not text:
         return []
     idx = text.rfind(SOURCE_FOOTER_PREFIX)
@@ -71,7 +71,7 @@ async def handle_feedback(query: CallbackQuery, callback_data: FeedbackCB, db: D
 
     context = await db.get_feedback_context(assistant_msg_id)
     if context is None:
-        await query.answer("Не удалось сохранить отзыв 🤔")
+        await query.answer("Couldn't save your feedback 🤔")
         return
 
     message = query.message
@@ -83,7 +83,7 @@ async def handle_feedback(query: CallbackQuery, callback_data: FeedbackCB, db: D
         rating=callback_data.rating,
         cited_source_ids=cited,
     )
-    await query.answer("Спасибо за отзыв! 🙏")
+    await query.answer("Thanks for your feedback! 🙏")
 
     # Remove the buttons so the answer can't be re-rated from the UI (idempotent).
     edit_markup = getattr(message, "edit_reply_markup", None)

@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 
 chat_router = Router(name="chat")
 
-_ALREADY_QUEUED = "Ваш вопрос уже передан менеджеру — ожидайте ответа 🙏"
+_ALREADY_QUEUED = "Your question is already with a manager — please wait for a reply 🙏"
 _HONEST_DONT_KNOW = (
-    "Не нашёл ответа в базе знаний. Передам ваш вопрос менеджеру — он скоро ответит."
+    "Couldn't find an answer in the knowledge base. I'll pass your question to a manager — they'll reply soon."
 )
-_ERROR_REPLY = "⚠️ Что-то пошло не так. Попробуйте ещё раз чуть позже."
+_ERROR_REPLY = "⚠️ Something went wrong. Please try again a bit later."
 
 
 @chat_router.message(F.text & ~F.text.startswith("/") & (F.chat.type == "private"))
