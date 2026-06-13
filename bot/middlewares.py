@@ -20,7 +20,7 @@ from aiogram.types import TelegramObject
 
 logger = logging.getLogger(__name__)
 
-_BUSY = "Слишком много запросов подряд. Подождите минуту 🙏"
+_BUSY = "Too many requests in a row. Please wait a minute 🙏"
 
 
 class ThrottleMiddleware(BaseMiddleware):

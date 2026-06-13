@@ -106,10 +106,10 @@ async def _set_commands(bot: Bot) -> None:
     """Register the tappable command menu so commands autocomplete in Telegram."""
     await bot.set_my_commands(
         [
-            BotCommand(command="start", description="О боте и что я умею"),
-            BotCommand(command="help", description="Краткая справка"),
-            BotCommand(command="upload", description="Загрузить документ (админ)"),
-            BotCommand(command="sources", description="Список источников (админ)"),
+            BotCommand(command="start", description="About the bot and what it can do"),
+            BotCommand(command="help", description="Quick help"),
+            BotCommand(command="upload", description="Upload a document (admin)"),
+            BotCommand(command="sources", description="List sources (admin)"),
         ]
     )
 
